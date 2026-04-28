@@ -17,8 +17,9 @@ message Event {
   google.protobuf.Timestamp occurred_at = 6;
   // payload is raw JSON bytes — transmitted without deserialization to prevent
   // float64 precision loss. Receivers must parse the JSON themselves.
-  bytes               payload  = 7;
-  map<string, string> metadata = 8; // Cross-cutting (trace_id, user_id, correlation_id…)
+  bytes               payload        = 7;
+  map<string, string> metadata       = 8; // Cross-cutting key-value metadata.
+  string              correlation_id = 9; // Request-scoped trace identifier set at HTTP ingress.
 }
 
 // IngestRequest is the write model for the ingest API.

@@ -34,7 +34,8 @@ type Event struct {
 	// payload is raw JSON bytes — transmitted without deserialization to prevent
 	// float64 precision loss. Receivers must parse the JSON themselves.
 	Payload       []byte            `protobuf:"bytes,7,opt,name=payload,proto3" json:"payload,omitempty"`
-	Metadata      map[string]string `protobuf:"bytes,8,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Cross-cutting (trace_id, user_id, correlation_id…)
+	Metadata      map[string]string `protobuf:"bytes,8,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Cross-cutting key-value metadata.
+	CorrelationId string            `protobuf:"bytes,9,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`                                            // Request-scoped trace identifier set at HTTP ingress.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -123,6 +124,13 @@ func (x *Event) GetMetadata() map[string]string {
 		return x.Metadata
 	}
 	return nil
+}
+
+func (x *Event) GetCorrelationId() string {
+	if x != nil {
+		return x.CorrelationId
+	}
+	return ""
 }
 
 // IngestRequest is the write model for the ingest API.
@@ -390,7 +398,7 @@ var File_events_proto protoreflect.FileDescriptor
 
 const file_events_proto_rawDesc = "" +
 	"\n" +
-	"\fevents.proto\x12\tevents.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xca\x02\n" +
+	"\fevents.proto\x12\tevents.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf1\x02\n" +
 	"\x05Event\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\tstream_id\x18\x02 \x01(\tR\bstreamId\x12\x12\n" +
@@ -400,7 +408,8 @@ const file_events_proto_rawDesc = "" +
 	"\voccurred_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"occurredAt\x12\x18\n" +
 	"\apayload\x18\a \x01(\fR\apayload\x12:\n" +
-	"\bmetadata\x18\b \x03(\v2\x1e.events.v1.Event.MetadataEntryR\bmetadata\x1a;\n" +
+	"\bmetadata\x18\b \x03(\v2\x1e.events.v1.Event.MetadataEntryR\bmetadata\x12%\n" +
+	"\x0ecorrelation_id\x18\t \x01(\tR\rcorrelationId\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf3\x01\n" +

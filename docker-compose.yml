@@ -23,13 +23,18 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
       interval: 10s
       timeout: 10s
-      retries: 10
-      start_period: 20s
+      retries: 15
+      start_period: 30s
 
   # Kafka UI
   kafka-ui:
@@ -152,19 +157,13 @@ services:
       KAFKA_TOPIC: "events.v1"
       KAFKA_DLQ_TOPIC: ""
       KAFKA_GROUP_ID: "consumer-service"
-      KAFKA_TOPIC_PARTITIONS: "6"
-      KAFKA_TOPIC_REPLICATION: "1"
-      KAFKA_TOPIC_ROUTES: ""
       ELASTICSEARCH_ADDRS: "http://elasticsearch:9200"
       ELASTICSEARCH_INDEX: "events"
-      AUTH_MODE: "none"
-      AUTH_API_KEY: "dev-api-key"
-      ADMIN_KEY: "admin-secret"
     depends_on:
-      postgres:
-        condition: service_healthy
       kafka:
         condition: service_healthy
+      postgres:
+        condition: service_started
       elasticsearch:
         condition: service_healthy
     healthcheck:
@@ -187,11 +186,11 @@ services:
       KAFKA_TOPIC: "events.v1"
       KAFKA_DLQ_TOPIC: ""
       KAFKA_GROUP_ID: "consumer-service"
-      KAFKA_TOPIC_PARTITIONS: "6"
-      KAFKA_TOPIC_REPLICATION: "1"
-      KAFKA_TOPIC_ROUTES: ""
       ELASTICSEARCH_ADDRS: "http://elasticsearch:9200"
       ELASTICSEARCH_INDEX: "events"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
     depends_on:
       kafka:
         condition: service_healthy

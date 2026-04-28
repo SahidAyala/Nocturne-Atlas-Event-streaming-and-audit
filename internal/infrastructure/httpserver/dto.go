@@ -1,6 +1,9 @@
 package httpserver
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // HealthResponse is the response body for GET /health.
 type HealthResponse struct {
@@ -20,8 +23,9 @@ type IngestRequest struct {
 	Type string `json:"type" example:"order.created"`
 	// Source is the originating service name.
 	Source string `json:"source" example:"orders-svc"`
-	// Payload is an arbitrary JSON object attached to the event.
-	Payload interface{} `json:"payload,omitempty" swaggertype:"object"`
+	// Payload is an arbitrary JSON value attached to the event.
+	// Accepted as raw JSON bytes to avoid float64 precision loss during decode.
+	Payload json.RawMessage `json:"payload,omitempty" swaggertype:"object"`
 	// Metadata is optional key-value metadata for routing or tracing.
 	Metadata map[string]string `json:"metadata,omitempty" example:"region:us-east-1,trace_id:abc-123"`
 }
@@ -42,8 +46,8 @@ type EventResponse struct {
 	Version int64 `json:"version" example:"1"`
 	// OccurredAt is the UTC timestamp when the event occurred.
 	OccurredAt time.Time `json:"occurred_at" example:"2026-04-21T10:00:00Z"`
-	// Payload is the arbitrary JSON payload.
-	Payload interface{} `json:"payload,omitempty" swaggertype:"object"`
+	// Payload is the arbitrary JSON payload, returned as raw JSON.
+	Payload json.RawMessage `json:"payload,omitempty" swaggertype:"object"`
 	// Metadata is the key-value metadata attached to the event.
 	Metadata map[string]string `json:"metadata,omitempty"`
 }

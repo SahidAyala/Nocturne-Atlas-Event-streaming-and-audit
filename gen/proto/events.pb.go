@@ -9,7 +9,6 @@ package eventsv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	structpb "google.golang.org/protobuf/types/known/structpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
@@ -25,15 +24,17 @@ const (
 
 // Event is an immutable domain fact stored in the append-only event log.
 type Event struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                             // UUID v4
-	StreamId      string                 `protobuf:"bytes,2,opt,name=stream_id,json=streamId,proto3" json:"stream_id,omitempty"` // Logical stream (e.g. "order:42", "user:7")
-	Type          string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`                         // Namespaced event type (e.g. "order.created")
-	Source        string                 `protobuf:"bytes,4,opt,name=source,proto3" json:"source,omitempty"`                     // Originating service (e.g. "orders-service")
-	Version       int64                  `protobuf:"varint,5,opt,name=version,proto3" json:"version,omitempty"`                  // Monotonically increasing per stream
-	OccurredAt    *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=occurred_at,json=occurredAt,proto3" json:"occurred_at,omitempty"`
-	Payload       *structpb.Struct       `protobuf:"bytes,7,opt,name=payload,proto3" json:"payload,omitempty"`                                                                             // Domain-specific data
-	Metadata      map[string]string      `protobuf:"bytes,8,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Cross-cutting (trace_id, user_id, correlation_id…)
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Id         string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                             // UUID v4
+	StreamId   string                 `protobuf:"bytes,2,opt,name=stream_id,json=streamId,proto3" json:"stream_id,omitempty"` // Logical stream (e.g. "order:42", "user:7")
+	Type       string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`                         // Namespaced event type (e.g. "order.created")
+	Source     string                 `protobuf:"bytes,4,opt,name=source,proto3" json:"source,omitempty"`                     // Originating service (e.g. "orders-service")
+	Version    int64                  `protobuf:"varint,5,opt,name=version,proto3" json:"version,omitempty"`                  // Monotonically increasing per stream
+	OccurredAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=occurred_at,json=occurredAt,proto3" json:"occurred_at,omitempty"`
+	// payload is raw JSON bytes — transmitted without deserialization to prevent
+	// float64 precision loss. Receivers must parse the JSON themselves.
+	Payload       []byte            `protobuf:"bytes,7,opt,name=payload,proto3" json:"payload,omitempty"`
+	Metadata      map[string]string `protobuf:"bytes,8,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Cross-cutting (trace_id, user_id, correlation_id…)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -110,7 +111,7 @@ func (x *Event) GetOccurredAt() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *Event) GetPayload() *structpb.Struct {
+func (x *Event) GetPayload() []byte {
 	if x != nil {
 		return x.Payload
 	}
@@ -126,12 +127,13 @@ func (x *Event) GetMetadata() map[string]string {
 
 // IngestRequest is the write model for the ingest API.
 type IngestRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	StreamId      string                 `protobuf:"bytes,1,opt,name=stream_id,json=streamId,proto3" json:"stream_id,omitempty"`
-	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
-	Source        string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`
-	Payload       *structpb.Struct       `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
-	Metadata      map[string]string      `protobuf:"bytes,5,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	StreamId string                 `protobuf:"bytes,1,opt,name=stream_id,json=streamId,proto3" json:"stream_id,omitempty"`
+	Type     string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	Source   string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`
+	// payload is raw JSON bytes — no float64 coercion on the wire.
+	Payload       []byte            `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	Metadata      map[string]string `protobuf:"bytes,5,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -187,7 +189,7 @@ func (x *IngestRequest) GetSource() string {
 	return ""
 }
 
-func (x *IngestRequest) GetPayload() *structpb.Struct {
+func (x *IngestRequest) GetPayload() []byte {
 	if x != nil {
 		return x.Payload
 	}
@@ -388,7 +390,7 @@ var File_events_proto protoreflect.FileDescriptor
 
 const file_events_proto_rawDesc = "" +
 	"\n" +
-	"\fevents.proto\x12\tevents.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xe3\x02\n" +
+	"\fevents.proto\x12\tevents.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xca\x02\n" +
 	"\x05Event\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\tstream_id\x18\x02 \x01(\tR\bstreamId\x12\x12\n" +
@@ -396,17 +398,17 @@ const file_events_proto_rawDesc = "" +
 	"\x06source\x18\x04 \x01(\tR\x06source\x12\x18\n" +
 	"\aversion\x18\x05 \x01(\x03R\aversion\x12;\n" +
 	"\voccurred_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"occurredAt\x121\n" +
-	"\apayload\x18\a \x01(\v2\x17.google.protobuf.StructR\apayload\x12:\n" +
+	"occurredAt\x12\x18\n" +
+	"\apayload\x18\a \x01(\fR\apayload\x12:\n" +
 	"\bmetadata\x18\b \x03(\v2\x1e.events.v1.Event.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8c\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf3\x01\n" +
 	"\rIngestRequest\x12\x1b\n" +
 	"\tstream_id\x18\x01 \x01(\tR\bstreamId\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x16\n" +
-	"\x06source\x18\x03 \x01(\tR\x06source\x121\n" +
-	"\apayload\x18\x04 \x01(\v2\x17.google.protobuf.StructR\apayload\x12B\n" +
+	"\x06source\x18\x03 \x01(\tR\x06source\x12\x18\n" +
+	"\apayload\x18\x04 \x01(\fR\apayload\x12B\n" +
 	"\bmetadata\x18\x05 \x03(\v2&.events.v1.IngestRequest.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
@@ -450,26 +452,23 @@ var file_events_proto_goTypes = []any{
 	nil,                           // 5: events.v1.Event.MetadataEntry
 	nil,                           // 6: events.v1.IngestRequest.MetadataEntry
 	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),       // 8: google.protobuf.Struct
 }
 var file_events_proto_depIdxs = []int32{
-	7,  // 0: events.v1.Event.occurred_at:type_name -> google.protobuf.Timestamp
-	8,  // 1: events.v1.Event.payload:type_name -> google.protobuf.Struct
-	5,  // 2: events.v1.Event.metadata:type_name -> events.v1.Event.MetadataEntry
-	8,  // 3: events.v1.IngestRequest.payload:type_name -> google.protobuf.Struct
-	6,  // 4: events.v1.IngestRequest.metadata:type_name -> events.v1.IngestRequest.MetadataEntry
-	7,  // 5: events.v1.ReplayRequest.from_time:type_name -> google.protobuf.Timestamp
-	7,  // 6: events.v1.ReplayRequest.to_time:type_name -> google.protobuf.Timestamp
-	0,  // 7: events.v1.EventStream.events:type_name -> events.v1.Event
-	1,  // 8: events.v1.EventService.Ingest:input_type -> events.v1.IngestRequest
-	3,  // 9: events.v1.EventService.Replay:input_type -> events.v1.ReplayRequest
-	2,  // 10: events.v1.EventService.Ingest:output_type -> events.v1.IngestResponse
-	4,  // 11: events.v1.EventService.Replay:output_type -> events.v1.EventStream
-	10, // [10:12] is the sub-list for method output_type
-	8,  // [8:10] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	7, // 0: events.v1.Event.occurred_at:type_name -> google.protobuf.Timestamp
+	5, // 1: events.v1.Event.metadata:type_name -> events.v1.Event.MetadataEntry
+	6, // 2: events.v1.IngestRequest.metadata:type_name -> events.v1.IngestRequest.MetadataEntry
+	7, // 3: events.v1.ReplayRequest.from_time:type_name -> google.protobuf.Timestamp
+	7, // 4: events.v1.ReplayRequest.to_time:type_name -> google.protobuf.Timestamp
+	0, // 5: events.v1.EventStream.events:type_name -> events.v1.Event
+	1, // 6: events.v1.EventService.Ingest:input_type -> events.v1.IngestRequest
+	3, // 7: events.v1.EventService.Replay:input_type -> events.v1.ReplayRequest
+	2, // 8: events.v1.EventService.Ingest:output_type -> events.v1.IngestResponse
+	4, // 9: events.v1.EventService.Replay:output_type -> events.v1.EventStream
+	8, // [8:10] is the sub-list for method output_type
+	6, // [6:8] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_events_proto_init() }

@@ -5,7 +5,6 @@ package events.v1;
 option go_package = "github.com/SheykoWk/event-streaming-and-audit/gen/proto/events;eventsv1";
 
 import "google/protobuf/timestamp.proto";
-import "google/protobuf/struct.proto";
 
 // Event is an immutable domain fact stored in the append-only event log.
 message Event {
@@ -16,8 +15,10 @@ message Event {
   int64  version   = 5; // Monotonically increasing per stream
 
   google.protobuf.Timestamp occurred_at = 6;
-  google.protobuf.Struct    payload     = 7; // Domain-specific data
-  map<string, string>       metadata    = 8; // Cross-cutting (trace_id, user_id, correlation_id…)
+  // payload is raw JSON bytes — transmitted without deserialization to prevent
+  // float64 precision loss. Receivers must parse the JSON themselves.
+  bytes               payload  = 7;
+  map<string, string> metadata = 8; // Cross-cutting (trace_id, user_id, correlation_id…)
 }
 
 // IngestRequest is the write model for the ingest API.
@@ -25,8 +26,9 @@ message IngestRequest {
   string stream_id = 1;
   string type      = 2;
   string source    = 3;
-  google.protobuf.Struct payload  = 4;
-  map<string, string>    metadata = 5;
+  // payload is raw JSON bytes — no float64 coercion on the wire.
+  bytes               payload  = 4;
+  map<string, string> metadata = 5;
 }
 
 // IngestResponse confirms durable storage and the assigned version.

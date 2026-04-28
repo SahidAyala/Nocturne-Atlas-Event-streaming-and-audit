@@ -331,13 +331,11 @@ func (h *handler) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload, _ := json.Marshal(req.Payload)
-
 	e, err := h.ingestSvc.Ingest(r.Context(), ingest.Command{
 		StreamID: req.StreamID,
 		Type:     req.Type,
 		Source:   req.Source,
-		Payload:  payload,
+		Payload:  req.Payload, // already json.RawMessage — no re-encoding
 		Metadata: req.Metadata,
 	})
 	if err != nil {

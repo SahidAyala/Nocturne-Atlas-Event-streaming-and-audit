@@ -411,6 +411,11 @@ const docTemplate = `{
         "internal_infrastructure_httpserver.EventResponse": {
             "type": "object",
             "properties": {
+                "correlation_id": {
+                    "description": "CorrelationID is the request-scoped trace identifier from the original ingest request.\nUse it to correlate this event with the ingest log, the Postgres row, and the Elasticsearch document.",
+                    "type": "string",
+                    "example": "01906c2e-4a3b-7000-8000-abc123def456"
+                },
                 "id": {
                     "description": "ID is the globally unique event UUID.",
                     "type": "string",
@@ -429,7 +434,7 @@ const docTemplate = `{
                     "example": "2026-04-21T10:00:00Z"
                 },
                 "payload": {
-                    "description": "Payload is the arbitrary JSON payload.",
+                    "description": "Payload is the arbitrary JSON payload, returned as raw JSON.",
                     "type": "object"
                 },
                 "source": {
@@ -483,7 +488,7 @@ const docTemplate = `{
                     }
                 },
                 "payload": {
-                    "description": "Payload is an arbitrary JSON object attached to the event.",
+                    "description": "Payload is an arbitrary JSON value attached to the event.\nAccepted as raw JSON bytes to avoid float64 precision loss during decode.",
                     "type": "object"
                 },
                 "source": {

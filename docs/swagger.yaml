@@ -34,6 +34,12 @@ definitions:
     type: object
   internal_infrastructure_httpserver.EventResponse:
     properties:
+      correlation_id:
+        description: |-
+          CorrelationID is the request-scoped trace identifier from the original ingest request.
+          Use it to correlate this event with the ingest log, the Postgres row, and the Elasticsearch document.
+        example: 01906c2e-4a3b-7000-8000-abc123def456
+        type: string
       id:
         description: ID is the globally unique event UUID.
         example: 01906c2e-4a3b-7000-8000-abc123def456
@@ -48,7 +54,7 @@ definitions:
         example: "2026-04-21T10:00:00Z"
         type: string
       payload:
-        description: Payload is the arbitrary JSON payload.
+        description: Payload is the arbitrary JSON payload, returned as raw JSON.
         type: object
       source:
         description: Source is the service that produced the event.
@@ -90,7 +96,9 @@ definitions:
           trace_id: abc-123
         type: object
       payload:
-        description: Payload is an arbitrary JSON object attached to the event.
+        description: |-
+          Payload is an arbitrary JSON value attached to the event.
+          Accepted as raw JSON bytes to avoid float64 precision loss during decode.
         type: object
       source:
         description: Source is the originating service name.

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/SheykoWk/event-streaming-and-audit/internal/domain/event"
+	"github.com/SheykoWk/event-streaming-and-audit/internal/pkg/trace"
 )
 
 // Subscriber is satisfied by any message source that can deliver a stream of events.
@@ -19,10 +20,13 @@ type Subscriber interface {
 // DLQMessage is the envelope written to the dead-letter queue when an event
 // fails processing. It carries the original event so it can be reprocessed,
 // plus diagnostic metadata for alerting and root-cause analysis.
+// CorrelationID is promoted to the top level so DLQ consumers can filter and
+// trace failures without deserialising the nested event.
 type DLQMessage struct {
-	Event    *event.Event `json:"event"`
-	Reason   string       `json:"reason"`
-	FailedAt time.Time    `json:"failed_at"`
+	Event         *event.Event `json:"event"`
+	Reason        string       `json:"reason"`
+	FailedAt      time.Time    `json:"failed_at"`
+	CorrelationID string       `json:"correlation_id"`
 }
 
 // DLQPublisher is the outbound port for the dead-letter queue.
@@ -65,15 +69,19 @@ func (s *Service) handle(ctx context.Context, e *event.Event) error {
 		"stream_id", e.StreamID,
 		"type", e.Type,
 		"version", e.Version,
+		"tenant_id", e.TenantID,
+		"correlation_id", trace.Coalesce(ctx, e.CorrelationID),
 	)
 	return nil
 }
 
 func (s *Service) routeToDLQ(ctx context.Context, e *event.Event, indexErr error) {
+	correlationID := trace.Coalesce(ctx, e.CorrelationID)
 	msg := DLQMessage{
-		Event:    e,
-		Reason:   indexErr.Error(),
-		FailedAt: time.Now().UTC(),
+		Event:         e,
+		Reason:        indexErr.Error(),
+		FailedAt:      time.Now().UTC(),
+		CorrelationID: correlationID,
 	}
 	if dlqErr := s.dlq.Publish(ctx, msg); dlqErr != nil {
 		// Double failure: both the indexer and the DLQ are unavailable.
@@ -82,6 +90,8 @@ func (s *Service) routeToDLQ(ctx context.Context, e *event.Event, indexErr error
 		s.log.Error("failed to publish to DLQ — event will be skipped",
 			"event_id", e.ID,
 			"stream_id", e.StreamID,
+			"tenant_id", e.TenantID,
+			"correlation_id", correlationID,
 			"index_error", indexErr,
 			"dlq_error", fmt.Errorf("dlq publish: %w", dlqErr),
 		)
@@ -91,6 +101,8 @@ func (s *Service) routeToDLQ(ctx context.Context, e *event.Event, indexErr error
 		"event_id", e.ID,
 		"stream_id", e.StreamID,
 		"version", e.Version,
+		"tenant_id", e.TenantID,
+		"correlation_id", correlationID,
 		"reason", indexErr.Error(),
 	)
 }

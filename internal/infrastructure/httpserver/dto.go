@@ -46,6 +46,9 @@ type EventResponse struct {
 	Version int64 `json:"version" example:"1"`
 	// OccurredAt is the UTC timestamp when the event occurred.
 	OccurredAt time.Time `json:"occurred_at" example:"2026-04-21T10:00:00Z"`
+	// CorrelationID is the request-scoped trace identifier from the original ingest request.
+	// Use it to correlate this event with the ingest log, the Postgres row, and the Elasticsearch document.
+	CorrelationID string `json:"correlation_id,omitempty" example:"01906c2e-4a3b-7000-8000-abc123def456"`
 	// Payload is the arbitrary JSON payload, returned as raw JSON.
 	Payload json.RawMessage `json:"payload,omitempty" swaggertype:"object"`
 	// Metadata is the key-value metadata attached to the event.

@@ -35,7 +35,7 @@ func main() {
 	defer store.Close()
 
 	replaySvc := replay.NewService(store, log)
-	handler := grpcserver.NewHandler(replaySvc)
+	handler := grpcserver.NewHandler(replaySvc, log)
 
 	srv := grpc.NewServer()
 	eventsv1.RegisterEventServiceServer(srv, handler)

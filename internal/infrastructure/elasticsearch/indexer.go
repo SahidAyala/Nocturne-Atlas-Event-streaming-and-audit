@@ -23,15 +23,16 @@ import (
 const mapping = `{
   "mappings": {
     "properties": {
-      "id":          { "type": "keyword" },
-      "tenant_id":   { "type": "keyword" },
-      "stream_id":   { "type": "keyword" },
-      "type":        { "type": "keyword" },
-      "source":      { "type": "keyword" },
-      "version":     { "type": "long"    },
-      "occurred_at": { "type": "date"    },
-      "payload":     { "type": "object", "dynamic": true },
-      "metadata":    { "type": "object", "dynamic": true }
+      "id":             { "type": "keyword" },
+      "tenant_id":      { "type": "keyword" },
+      "stream_id":      { "type": "keyword" },
+      "type":           { "type": "keyword" },
+      "source":         { "type": "keyword" },
+      "version":        { "type": "long"    },
+      "occurred_at":    { "type": "date"    },
+      "correlation_id": { "type": "keyword" },
+      "payload":        { "type": "object", "dynamic": true },
+      "metadata":       { "type": "object", "dynamic": true }
     }
   }
 }`

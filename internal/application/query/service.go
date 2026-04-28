@@ -7,6 +7,7 @@ import (
 
 	appauth "github.com/SheykoWk/event-streaming-and-audit/internal/application/auth"
 	"github.com/SheykoWk/event-streaming-and-audit/internal/domain/event"
+	"github.com/SheykoWk/event-streaming-and-audit/internal/pkg/trace"
 )
 
 const (
@@ -15,7 +16,14 @@ const (
 )
 
 // Query carries the parameters for retrieving events from the read model.
-type Query struct {
+type IdQuery struct {
+	StreamID string
+	Limit    int
+	Offset   int
+}
+
+// Query carries the parameters for retrieving events from the read model.
+type StreamQuery struct {
 	StreamID string
 	Limit    int
 	Offset   int
@@ -86,6 +94,7 @@ func (s *Service) ListAll(ctx context.Context, q ListQuery) (*ListResult, error)
 	})
 	if err != nil {
 		s.log.Error("read model list failed",
+			"correlation_id", trace.FromContext(ctx),
 			"tenant_id", identity.TenantID,
 			"limit", q.Limit,
 			"offset", q.Offset,
@@ -111,7 +120,7 @@ func (s *Service) ListAll(ctx context.Context, q ListQuery) (*ListResult, error)
 // from the Elasticsearch read model. Results are eventually consistent with
 // the PostgreSQL event store.
 // Requires an Identity in ctx for tenant scoping — returns an error if absent.
-func (s *Service) QueryByStream(ctx context.Context, q Query) (*Result, error) {
+func (s *Service) QueryByStream(ctx context.Context, q StreamQuery) (*Result, error) {
 	identity, ok := appauth.IdentityFromContext(ctx)
 	if !ok || identity.TenantID == "" {
 		return nil, fmt.Errorf("unauthenticated: identity with tenant_id is required")
@@ -138,6 +147,7 @@ func (s *Service) QueryByStream(ctx context.Context, q Query) (*Result, error) {
 	})
 	if err != nil {
 		s.log.Error("read model search failed",
+			"correlation_id", trace.FromContext(ctx),
 			"stream_id", q.StreamID,
 			"tenant_id", identity.TenantID,
 			"limit", q.Limit,

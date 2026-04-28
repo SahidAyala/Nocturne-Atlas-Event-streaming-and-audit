@@ -59,6 +59,8 @@ func (c *Consumer) Run(ctx context.Context, handle func(context.Context, *event.
 				"topic", msg.Topic,
 				"partition", msg.Partition,
 				"offset", msg.Offset,
+				"message_key", string(msg.Key),
+				"payload_preview", payloadPreview(msg.Value, 200),
 				"error", err,
 			)
 			// Commit to advance past the poison pill; don't halt the consumer.
@@ -70,7 +72,15 @@ func (c *Consumer) Run(ctx context.Context, handle func(context.Context, *event.
 
 		if err := handle(ctx, &e); err != nil {
 			// Do not commit — restart will reprocess from this offset.
-			// TODO: add exponential back-off / dead-letter queue for production use.
+			// Log structured fields here because the caller (main.go) only
+			// receives the wrapped error string and loses all context.
+			c.log.Error("handler rejected event — consumer stopping",
+				"event_id", e.ID,
+				"stream_id", e.StreamID,
+				"version", e.Version,
+				"correlation_id", e.CorrelationID,
+				"error", err,
+			)
 			return fmt.Errorf("handle event %s: %w", e.ID, err)
 		}
 
@@ -82,4 +92,13 @@ func (c *Consumer) Run(ctx context.Context, handle func(context.Context, *event.
 
 func (c *Consumer) Close() error {
 	return c.reader.Close()
+}
+
+// payloadPreview returns a safe, truncated string of raw bytes for log diagnostics.
+// Limits output to maxBytes to prevent log flooding from large or binary payloads.
+func payloadPreview(b []byte, maxBytes int) string {
+	if len(b) <= maxBytes {
+		return string(b)
+	}
+	return string(b[:maxBytes]) + "…"
 }

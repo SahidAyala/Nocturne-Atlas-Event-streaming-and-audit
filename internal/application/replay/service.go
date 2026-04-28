@@ -7,6 +7,7 @@ import (
 
 	appauth "github.com/SheykoWk/event-streaming-and-audit/internal/application/auth"
 	"github.com/SheykoWk/event-streaming-and-audit/internal/domain/event"
+	"github.com/SheykoWk/event-streaming-and-audit/internal/pkg/trace"
 )
 
 // Command carries the parameters for a replay request.
@@ -46,11 +47,19 @@ func (s *Service) Replay(ctx context.Context, cmd Command) ([]*event.Event, erro
 
 	events, err := s.store.GetFromVersion(ctx, cmd.StreamID, cmd.FromVersion)
 	if err != nil {
+		s.log.Error("failed to read events from store",
+			"correlation_id", trace.FromContext(ctx),
+			"stream_id", cmd.StreamID,
+			"from_version", cmd.FromVersion,
+			"tenant_id", identity.TenantID,
+			"error", err,
+		)
 		return nil, fmt.Errorf("read events from store: %w", err)
 	}
 
 	if err := validateContiguous(events); err != nil {
 		s.log.Error("version gap detected during replay",
+			"correlation_id", trace.FromContext(ctx),
 			"stream_id", cmd.StreamID,
 			"tenant_id", identity.TenantID,
 			"from_version", cmd.FromVersion,
@@ -61,6 +70,7 @@ func (s *Service) Replay(ctx context.Context, cmd Command) ([]*event.Event, erro
 	}
 
 	s.log.Info("replay completed",
+		"correlation_id", trace.FromContext(ctx),
 		"stream_id", cmd.StreamID,
 		"tenant_id", identity.TenantID,
 		"from_version", cmd.FromVersion,

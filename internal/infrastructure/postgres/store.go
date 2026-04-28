@@ -16,23 +16,26 @@ import (
 
 const ddl = `
 CREATE TABLE IF NOT EXISTS events (
-    id          UUID        PRIMARY KEY,
-    tenant_id   TEXT        NOT NULL DEFAULT 'default',
-    stream_id   TEXT        NOT NULL,
-    type        TEXT        NOT NULL,
-    source      TEXT        NOT NULL,
-    version     BIGINT      NOT NULL,
-    occurred_at TIMESTAMPTZ NOT NULL,
-    payload     JSONB       NOT NULL,
-    metadata    JSONB       NOT NULL DEFAULT '{}',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    id             UUID        PRIMARY KEY,
+    tenant_id      TEXT        NOT NULL DEFAULT 'default',
+    stream_id      TEXT        NOT NULL,
+    type           TEXT        NOT NULL,
+    source         TEXT        NOT NULL,
+    version        BIGINT      NOT NULL,
+    occurred_at    TIMESTAMPTZ NOT NULL,
+    payload        JSONB       NOT NULL,
+    metadata       JSONB       NOT NULL DEFAULT '{}',
+    correlation_id TEXT        NOT NULL DEFAULT '',
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (stream_id, version)
 );
-ALTER TABLE events ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default';
-CREATE INDEX IF NOT EXISTS idx_events_stream_id    ON events (stream_id);
-CREATE INDEX IF NOT EXISTS idx_events_type         ON events (type);
-CREATE INDEX IF NOT EXISTS idx_events_occurred_at  ON events (occurred_at DESC);
-CREATE INDEX IF NOT EXISTS idx_events_tenant_id    ON events (tenant_id);
+ALTER TABLE events ADD COLUMN IF NOT EXISTS tenant_id      TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE events ADD COLUMN IF NOT EXISTS correlation_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_events_stream_id       ON events (stream_id);
+CREATE INDEX IF NOT EXISTS idx_events_type            ON events (type);
+CREATE INDEX IF NOT EXISTS idx_events_occurred_at     ON events (occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_events_tenant_id       ON events (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_events_correlation_id  ON events (correlation_id);
 `
 
 // EventStore is a PostgreSQL-backed append-only event store.
@@ -69,14 +72,14 @@ func (s *EventStore) Append(ctx context.Context, e *event.Event) error {
 	}
 
 	err = s.pool.QueryRow(ctx, `
-		INSERT INTO events (id, tenant_id, stream_id, type, source, version, occurred_at, payload, metadata)
+		INSERT INTO events (id, tenant_id, stream_id, type, source, version, occurred_at, payload, metadata, correlation_id)
 		VALUES (
 			$1, $2, $3, $4, $5,
 			(SELECT COALESCE(MAX(version), 0) + 1 FROM events WHERE stream_id = $3),
-			$6, $7, $8
+			$6, $7, $8, $9
 		)
 		RETURNING version`,
-		e.ID, e.TenantID, e.StreamID, e.Type, e.Source, e.OccurredAt, e.Payload, meta,
+		e.ID, e.TenantID, e.StreamID, e.Type, e.Source, e.OccurredAt, e.Payload, meta, e.CorrelationID,
 	).Scan(&e.Version)
 	if err != nil {
 		return fmt.Errorf("insert event: %w", err)
@@ -94,7 +97,7 @@ func (s *EventStore) GetByStreamID(ctx context.Context, streamID string) ([]*eve
 
 	if hasIdentity && identity.TenantID != "" {
 		rows, err = s.pool.Query(ctx, `
-			SELECT id, tenant_id, stream_id, type, source, version, occurred_at, payload, metadata
+			SELECT id, tenant_id, stream_id, type, source, version, occurred_at, payload, metadata, correlation_id
 			FROM events
 			WHERE stream_id = $1 AND tenant_id = $2
 			ORDER BY version ASC`,
@@ -102,7 +105,7 @@ func (s *EventStore) GetByStreamID(ctx context.Context, streamID string) ([]*eve
 		)
 	} else {
 		rows, err = s.pool.Query(ctx, `
-			SELECT id, tenant_id, stream_id, type, source, version, occurred_at, payload, metadata
+			SELECT id, tenant_id, stream_id, type, source, version, occurred_at, payload, metadata, correlation_id
 			FROM events
 			WHERE stream_id = $1
 			ORDER BY version ASC`,
@@ -128,7 +131,7 @@ func (s *EventStore) GetFromVersion(ctx context.Context, streamID string, fromVe
 
 	if hasIdentity && identity.TenantID != "" {
 		rows, err = s.pool.Query(ctx, `
-			SELECT id, tenant_id, stream_id, type, source, version, occurred_at, payload, metadata
+			SELECT id, tenant_id, stream_id, type, source, version, occurred_at, payload, metadata, correlation_id
 			FROM events
 			WHERE stream_id = $1 AND version >= $2 AND tenant_id = $3
 			ORDER BY version ASC`,
@@ -136,7 +139,7 @@ func (s *EventStore) GetFromVersion(ctx context.Context, streamID string, fromVe
 		)
 	} else {
 		rows, err = s.pool.Query(ctx, `
-			SELECT id, tenant_id, stream_id, type, source, version, occurred_at, payload, metadata
+			SELECT id, tenant_id, stream_id, type, source, version, occurred_at, payload, metadata, correlation_id
 			FROM events
 			WHERE stream_id = $1 AND version >= $2
 			ORDER BY version ASC`,
@@ -154,7 +157,7 @@ func (s *EventStore) GetFromVersion(ctx context.Context, streamID string, fromVe
 // GetByID returns a single event by its UUID.
 func (s *EventStore) GetByID(ctx context.Context, id uuid.UUID) (*event.Event, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, tenant_id, stream_id, type, source, version, occurred_at, payload, metadata
+		SELECT id, tenant_id, stream_id, type, source, version, occurred_at, payload, metadata, correlation_id
 		FROM events WHERE id = $1`, id)
 
 	e, err := scanEvent(row)
@@ -178,7 +181,7 @@ func scanEvent(s scanner) (*event.Event, error) {
 	var meta []byte
 	if err := s.Scan(
 		&e.ID, &e.TenantID, &e.StreamID, &e.Type, &e.Source, &e.Version,
-		&e.OccurredAt, &e.Payload, &meta,
+		&e.OccurredAt, &e.Payload, &meta, &e.CorrelationID,
 	); err != nil {
 		return nil, fmt.Errorf("scan event: %w", err)
 	}

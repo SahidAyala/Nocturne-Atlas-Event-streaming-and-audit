@@ -2,9 +2,13 @@ package event
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 )
+
+// ErrNotFound is returned by Store.GetByID when no event matches the given UUID.
+var ErrNotFound = errors.New("event not found")
 
 // Store is the outbound port for the append-only event store.
 // Append must set e.Version to the DB-assigned value before returning.
@@ -15,6 +19,9 @@ type Store interface {
 	// GetFromVersion returns all events for a stream with version >= fromVersion,
 	// ordered by version ASC. fromVersion=0 returns all events from the beginning.
 	GetFromVersion(ctx context.Context, streamID string, fromVersion int64) ([]*Event, error)
+	// ListByCorrelationID returns a paginated, occurred_at DESC slice of events matching
+	// tenantID and correlationID. total is the unfiltered count (for pagination).
+	ListByCorrelationID(ctx context.Context, tenantID, correlationID string, limit, offset int) ([]*Event, int64, error)
 }
 
 // Publisher is the outbound port for the event bus.

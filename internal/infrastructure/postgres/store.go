@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -155,6 +156,7 @@ func (s *EventStore) GetFromVersion(ctx context.Context, streamID string, fromVe
 }
 
 // GetByID returns a single event by its UUID.
+// Returns event.ErrNotFound when no row matches.
 func (s *EventStore) GetByID(ctx context.Context, id uuid.UUID) (*event.Event, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, tenant_id, stream_id, type, source, version, occurred_at, payload, metadata, correlation_id
@@ -162,9 +164,52 @@ func (s *EventStore) GetByID(ctx context.Context, id uuid.UUID) (*event.Event, e
 
 	e, err := scanEvent(row)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, event.ErrNotFound
+		}
 		return nil, fmt.Errorf("get by id: %w", err)
 	}
 	return e, nil
+}
+
+// ListByCorrelationID returns a paginated, occurred_at DESC page of events for a tenant
+// filtered by correlation_id. Uses idx_events_correlation_id for the lookup.
+// total reflects the full match count before pagination (window function — single query).
+func (s *EventStore) ListByCorrelationID(ctx context.Context, tenantID, correlationID string, limit, offset int) ([]*event.Event, int64, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, tenant_id, stream_id, type, source, version, occurred_at, payload, metadata, correlation_id,
+		       COUNT(*) OVER() AS total
+		FROM events
+		WHERE tenant_id = $1 AND correlation_id = $2
+		ORDER BY occurred_at DESC
+		LIMIT $3 OFFSET $4`,
+		tenantID, correlationID, limit, offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list by correlation_id: %w", err)
+	}
+	defer rows.Close()
+
+	var events []*event.Event
+	var total int64
+	for rows.Next() {
+		var e event.Event
+		var meta []byte
+		if err := rows.Scan(
+			&e.ID, &e.TenantID, &e.StreamID, &e.Type, &e.Source, &e.Version,
+			&e.OccurredAt, &e.Payload, &meta, &e.CorrelationID, &total,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan event: %w", err)
+		}
+		if err := json.Unmarshal(meta, &e.Metadata); err != nil {
+			return nil, 0, fmt.Errorf("unmarshal metadata: %w", err)
+		}
+		events = append(events, &e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("rows error: %w", err)
+	}
+	return events, total, nil
 }
 
 func (s *EventStore) Close() {

@@ -90,7 +90,7 @@ func main() {
 	}
 
 	ingestSvc := ingest.NewService(store, publisher, log)
-	querySvc := query.NewService(esIndexer, log)
+	querySvc := query.NewService(store, esIndexer, log)
 
 	authenticator := buildAuthenticator(cfg.Auth, log)
 	issuer := buildIssuer(cfg.Auth, log)

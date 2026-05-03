@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -59,6 +60,7 @@ func NewRouter(ingestSvc *ingest.Service, querySvc *query.Service, authenticator
 		r.Use(authmw.Auth(authenticator))
 		r.Post("/", h.ingest)
 		r.Get("/", h.listEvents)
+		r.Get("/{id}", h.getByID)
 	})
 
 	return r
@@ -274,21 +276,29 @@ func (h *handler) createTenant(w http.ResponseWriter, r *http.Request) {
 // @Description  Returns a paginated list of events across all streams, sorted by
 // @Description  occurred_at DESC (newest first). Useful as an audit feed or event log.
 // @Description
-// @Description  Results come from the Elasticsearch read model and are **eventually consistent**
-// @Description  with the PostgreSQL event store — recently ingested events may not appear immediately.
+// @Description  **Without `correlation_id`**: results come from the Elasticsearch read model
+// @Description  (eventually consistent — recently ingested events may not appear immediately).
+// @Description
+// @Description  **With `correlation_id`**: results are fetched from PostgreSQL (source of truth,
+// @Description  strongly consistent) using the `idx_events_correlation_id` index.
+// @Description  Response headers reflect the active data source:
+// @Description  - X-Read-Model: postgres | elasticsearch
+// @Description  - X-Data-Consistency: strong | eventual
 // @Tags         events
 // @Produce      json
 // @Security     ApiKeyAuth
 // @Security     BearerAuth
-// @Param        limit   query     int  false  "Page size — default 20, max 100"
-// @Param        offset  query     int  false  "Number of events to skip — default 0"
-// @Success      200     {object}  ListEventsResponse
-// @Failure      401     {object}  ErrorResponse  "Missing or invalid credentials"
-// @Failure      500     {object}  ErrorResponse  "Read model query failed"
+// @Param        limit          query     int     false  "Page size — default 20, max 100"
+// @Param        offset         query     int     false  "Number of events to skip — default 0"
+// @Param        correlation_id query     string  false  "Filter by correlation ID (strong consistency via PostgreSQL)"
+// @Success      200  {object}  ListEventsResponse
+// @Failure      401  {object}  ErrorResponse  "Missing or invalid credentials"
+// @Failure      500  {object}  ErrorResponse  "Read model query failed"
 // @Router       /events [get]
 func (h *handler) listEvents(w http.ResponseWriter, r *http.Request) {
 	limit := parseIntParam(r, "limit", 20)
 	offset := parseIntParam(r, "offset", 0)
+	filterCorrelationID := r.URL.Query().Get("correlation_id")
 
 	correlationID := r.Header.Get("X-Correlation-ID")
 	if correlationID == "" {
@@ -300,16 +310,23 @@ func (h *handler) listEvents(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	result, err := h.querySvc.ListAll(ctx, query.ListQuery{
-		Limit:  limit,
-		Offset: offset,
+		Limit:         limit,
+		Offset:        offset,
+		CorrelationID: filterCorrelationID,
 	})
 	if err != nil {
 		h.log.Error("list events failed",
 			"correlation_id", correlationID,
+			"filter_correlation_id", filterCorrelationID,
 			"error", err,
 		)
 		writeError(w, http.StatusInternalServerError, "query failed")
 		return
+	}
+
+	consistency := "eventual"
+	if result.ReadModel == "postgres" {
+		consistency = "strong"
 	}
 
 	events := make([]EventResponse, len(result.Events))
@@ -317,8 +334,8 @@ func (h *handler) listEvents(w http.ResponseWriter, r *http.Request) {
 		events[i] = domainToEventResponse(e)
 	}
 
-	w.Header().Set("X-Read-Model", "elasticsearch")
-	w.Header().Set("X-Data-Consistency", "eventual")
+	w.Header().Set("X-Read-Model", result.ReadModel)
+	w.Header().Set("X-Data-Consistency", consistency)
 	writeJSON(w, http.StatusOK, ListEventsResponse{
 		Events:    events,
 		Total:     result.Total,
@@ -470,6 +487,62 @@ func (h *handler) getByStream(w http.ResponseWriter, r *http.Request) {
 		Offset:    result.Offset,
 		ReadModel: result.ReadModel,
 	})
+}
+
+// getByID godoc
+// @Summary      Get event by ID
+// @Description  Returns a single event by its UUID. This is a direct O(1) lookup against
+// @Description  PostgreSQL (source of truth) — always consistent, no replication lag.
+// @Description  Use this when you know the event ID and need the authoritative record.
+// @Description  For stream history or aggregate reconstruction, use GET /streams/{streamID}/events.
+// @Tags         events
+// @Produce      json
+// @Security     ApiKeyAuth
+// @Security     BearerAuth
+// @Param        id  path      string  true  "Event UUID (e.g. 01906c2e-4a3b-7000-8000-abc123def456)"
+// @Success      200  {object}  EventResponse
+// @Failure      400  {object}  ErrorResponse  "id is not a valid UUID"
+// @Failure      401  {object}  ErrorResponse  "Missing or invalid credentials"
+// @Failure      404  {object}  ErrorResponse  "Event not found"
+// @Failure      500  {object}  ErrorResponse  "Store lookup failed"
+// @Router       /events/by-id/{id} [get]
+func (h *handler) getByID(w http.ResponseWriter, r *http.Request) {
+	rawID := chi.URLParam(r, "id")
+
+	id, err := uuid.Parse(rawID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "id must be a valid UUID")
+		return
+	}
+
+	correlationID := r.Header.Get("X-Correlation-ID")
+	if correlationID == "" {
+		correlationID = chimw.GetReqID(r.Context())
+	}
+	ctx := trace.WithCorrelationID(r.Context(), correlationID)
+	w.Header().Set("X-Correlation-ID", correlationID)
+
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	e, err := h.querySvc.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, event.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "event not found")
+			return
+		}
+		h.log.Error("get by id failed",
+			"correlation_id", correlationID,
+			"event_id", rawID,
+			"error", err,
+		)
+		writeError(w, http.StatusInternalServerError, "lookup failed")
+		return
+	}
+
+	w.Header().Set("X-Read-Model", "postgres")
+	w.Header().Set("X-Data-Consistency", "strong")
+	writeJSON(w, http.StatusOK, domainToEventResponse(e))
 }
 
 // parseIntParam reads an integer query parameter with a fallback default.

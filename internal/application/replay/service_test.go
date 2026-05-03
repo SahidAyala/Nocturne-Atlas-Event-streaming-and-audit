@@ -85,6 +85,30 @@ func (m *mockStore) GetFromVersion(_ context.Context, streamID string, fromVersi
 	return result, nil
 }
 
+func (m *mockStore) ListByCorrelationID(_ context.Context, tenantID, correlationID string, limit, offset int) ([]*event.Event, int64, error) {
+	if m.err != nil {
+		return nil, 0, m.err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var matched []*event.Event
+	for _, e := range m.events {
+		if e.TenantID == tenantID && e.CorrelationID == correlationID {
+			cp := *e
+			matched = append(matched, &cp)
+		}
+	}
+	total := int64(len(matched))
+	if offset >= len(matched) {
+		return []*event.Event{}, total, nil
+	}
+	end := offset + limit
+	if end > len(matched) {
+		end = len(matched)
+	}
+	return matched[offset:end], total, nil
+}
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------

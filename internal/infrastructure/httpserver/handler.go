@@ -19,6 +19,7 @@ import (
 	appauth "github.com/SheykoWk/event-streaming-and-audit/internal/application/auth"
 	"github.com/SheykoWk/event-streaming-and-audit/internal/application/ingest"
 	"github.com/SheykoWk/event-streaming-and-audit/internal/application/query"
+	appreplay "github.com/SheykoWk/event-streaming-and-audit/internal/application/replay"
 	"github.com/SheykoWk/event-streaming-and-audit/internal/domain/event"
 	infraauth "github.com/SheykoWk/event-streaming-and-audit/internal/infrastructure/auth"
 	authmw "github.com/SheykoWk/event-streaming-and-audit/internal/infrastructure/httpserver/middleware"
@@ -28,6 +29,7 @@ import (
 type handler struct {
 	ingestSvc     *ingest.Service
 	querySvc      *query.Service
+	replayEngine  *appreplay.ReplayEngine
 	authenticator infraauth.Authenticator
 	issuer        appauth.Issuer // nil when JWT secret is not configured
 	adminKey      string
@@ -37,13 +39,18 @@ type handler struct {
 // NewRouter wires up all routes and middleware.
 // issuer may be nil — POST /auth/issue returns 501 in that case.
 // adminKey protects POST /tenants via the X-Admin-Key header.
-func NewRouter(ingestSvc *ingest.Service, querySvc *query.Service, authenticator infraauth.Authenticator, issuer appauth.Issuer, adminKey string, log *slog.Logger) http.Handler {
-	h := &handler{ingestSvc: ingestSvc, querySvc: querySvc, authenticator: authenticator, issuer: issuer, adminKey: adminKey, log: log}
+// replayEngine may be nil — POST /replay returns 501 in that case.
+func NewRouter(ingestSvc *ingest.Service, querySvc *query.Service, replayEngine *appreplay.ReplayEngine, authenticator infraauth.Authenticator, issuer appauth.Issuer, adminKey string, log *slog.Logger) http.Handler {
+	h := &handler{ingestSvc: ingestSvc, querySvc: querySvc, replayEngine: replayEngine, authenticator: authenticator, issuer: issuer, adminKey: adminKey, log: log}
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
 	r.Use(chimw.Recoverer)
+	// W3C TraceContext propagation — extracts traceparent, falls back to X-Trace-ID,
+	// or generates a fresh trace ID. Must run before auth so traceId is available
+	// in auth failure logs (ADR-014).
+	r.Use(authmw.TraceContext)
 
 	r.Get("/health", h.health)
 	r.Get("/swagger/*", httpSwagger.WrapHandler)
@@ -55,12 +62,16 @@ func NewRouter(ingestSvc *ingest.Service, querySvc *query.Service, authenticator
 	r.With(authmw.Auth(authenticator)).Post("/auth/issue", h.authIssue)
 	r.Post("/tenants", h.createTenant)
 	r.Get("/streams/{streamID}/events", h.getByStream)
+	r.With(authmw.Auth(authenticator)).Post("/replay", h.replayEvents)
 
 	r.Route("/events", func(r chi.Router) {
 		r.Use(authmw.Auth(authenticator))
 		r.Post("/", h.ingest)
 		r.Get("/", h.listEvents)
+		// /events/timeline must be registered before /{id} so the static segment wins.
+		r.Get("/timeline", h.getTimeline)
 		r.Get("/{id}", h.getByID)
+		r.Get("/{id}/causes", h.getEventCauses)
 	})
 
 	return r
@@ -396,6 +407,22 @@ func (h *handler) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve causation ID from header or request body (header takes precedence to
+	// allow proxies to set it without modifying the body).
+	causationID := r.Header.Get("X-Causation-ID")
+	if causationID == "" {
+		causationID = req.CausationID
+	}
+	// TraceID: prefer the W3C traceId extracted from traceparent by the trace middleware,
+	// then fall back to X-Trace-ID header, then to the request body field.
+	traceID := trace.TraceIDFromContext(ctx)
+	if traceID == "" {
+		traceID = r.Header.Get("X-Trace-ID")
+	}
+	if traceID == "" {
+		traceID = req.TraceID
+	}
+
 	e, err := h.ingestSvc.Ingest(ctx, ingest.Command{
 		StreamID:      req.StreamID,
 		Type:          req.Type,
@@ -403,6 +430,11 @@ func (h *handler) ingest(w http.ResponseWriter, r *http.Request) {
 		Payload:       req.Payload, // already json.RawMessage — no re-encoding
 		Metadata:      req.Metadata,
 		CorrelationID: correlationID,
+		EventVersion:  req.EventVersion,
+		CausationID:   causationID,
+		ActorID:       req.ActorID,
+		TraceID:       traceID,
+		SourceVersion: req.SourceVersion,
 	})
 	if err != nil {
 		h.log.Error("ingest failed",
@@ -545,6 +577,276 @@ func (h *handler) getByID(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, domainToEventResponse(e))
 }
 
+// replayEvents godoc
+// @Summary      Replay events
+// @Description  Replays events that match the given filter. In dry-run mode the matched
+// @Description  original events are returned without creating any new events. In active mode
+// @Description  each matched event is re-ingested as a new event with replay metadata attached
+// @Description  (is_replay=true, replay_id, replay_source_event_id). Original events are never
+// @Description  modified. See ADR-015 for full design rationale.
+// @Description
+// @Description  **Safety constraints**:
+// @Description  - `replay_reason` is required for active replays.
+// @Description  - Default safety limit is 1000 events per call; set `safety_limit` to override.
+// @Description  - Returns 422 if the filter matches more events than the safety limit.
+// @Tags         replay
+// @Accept       json
+// @Produce      json
+// @Security     ApiKeyAuth
+// @Security     BearerAuth
+// @Param        body  body      ReplayRequest  true  "Replay filter and options"
+// @Success      200   {object}  ReplayResponse
+// @Failure      400   {object}  ErrorResponse  "Invalid request body or timestamp format"
+// @Failure      401   {object}  ErrorResponse  "Missing or invalid credentials"
+// @Failure      422   {object}  ErrorResponse  "Validation error or safety limit exceeded"
+// @Failure      500   {object}  ErrorResponse  "Replay execution failed"
+// @Router       /replay [post]
+func (h *handler) replayEvents(w http.ResponseWriter, r *http.Request) {
+	if h.replayEngine == nil {
+		writeError(w, http.StatusNotImplemented, "replay is not configured")
+		return
+	}
+
+	correlationID := r.Header.Get("X-Correlation-ID")
+	if correlationID == "" {
+		correlationID = chimw.GetReqID(r.Context())
+	}
+	ctx := trace.WithCorrelationID(r.Context(), correlationID)
+	w.Header().Set("X-Correlation-ID", correlationID)
+
+	var req ReplayRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	var fromTime, toTime time.Time
+	if req.Filter.FromTime != "" {
+		t, err := time.Parse(time.RFC3339, req.Filter.FromTime)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "from_time must be an ISO-8601 timestamp (e.g. 2026-04-21T10:00:00Z)")
+			return
+		}
+		fromTime = t
+	}
+	if req.Filter.ToTime != "" {
+		t, err := time.Parse(time.RFC3339, req.Filter.ToTime)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "to_time must be an ISO-8601 timestamp (e.g. 2026-04-21T10:00:00Z)")
+			return
+		}
+		toTime = t
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	result, err := h.replayEngine.Execute(ctx, appreplay.ReplayRequest{
+		Filter: event.ReplayFilter{
+			TenantID:      req.Filter.TenantID,
+			StreamID:      req.Filter.StreamID,
+			CorrelationID: req.Filter.CorrelationID,
+			EventType:     req.Filter.EventType,
+			ActorID:       req.Filter.ActorID,
+			FromTime:      fromTime,
+			ToTime:        toTime,
+			EventIDs:      req.Filter.EventIDs,
+		},
+		Options: appreplay.ReplayOptions{
+			DryRun:       req.Options.DryRun,
+			ReplayReason: req.Options.ReplayReason,
+			SafetyLimit:  req.Options.SafetyLimit,
+		},
+	})
+	if err != nil {
+		if errors.Is(err, event.ErrReplayLimitExceeded) {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		h.log.Error("replay failed",
+			"correlation_id", correlationID,
+			"dry_run", req.Options.DryRun,
+			"error", err,
+		)
+		if errors.Is(err, context.DeadlineExceeded) {
+			writeError(w, http.StatusGatewayTimeout, "replay timed out")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "replay failed")
+		return
+	}
+
+	events := make([]EventResponse, len(result.Events))
+	for i, e := range result.Events {
+		events[i] = domainToEventResponse(e)
+	}
+
+	writeJSON(w, http.StatusOK, ReplayResponse{
+		ReplayID:      result.ReplayID,
+		DryRun:        result.DryRun,
+		MatchedCount:  result.MatchedCount,
+		ReplayedCount: result.ReplayedCount,
+		Events:        events,
+	})
+}
+
+// getEventCauses godoc
+// @Summary      Get events caused by a given event
+// @Description  Returns all events whose causation_id equals the given event ID. Allows
+// @Description  traversal of the causation tree — one hop at a time. Results are scoped to
+// @Description  the caller's tenant and ordered by occurred_at ASC. Served from PostgreSQL
+// @Description  (source of truth, strongly consistent). See ADR-017.
+// @Tags         events
+// @Produce      json
+// @Security     ApiKeyAuth
+// @Security     BearerAuth
+// @Param        id      path      string  true   "Source event UUID"
+// @Param        limit   query     int     false  "Page size — default 20, max 100"
+// @Param        offset  query     int     false  "Number of events to skip — default 0"
+// @Success      200     {object}  CausationResponse
+// @Failure      401     {object}  ErrorResponse  "Missing or invalid credentials"
+// @Failure      500     {object}  ErrorResponse  "Causation query failed"
+// @Router       /events/{id}/causes [get]
+func (h *handler) getEventCauses(w http.ResponseWriter, r *http.Request) {
+	rawID := chi.URLParam(r, "id")
+
+	limit := parseIntParam(r, "limit", 20)
+	offset := parseIntParam(r, "offset", 0)
+
+	correlationID := r.Header.Get("X-Correlation-ID")
+	if correlationID == "" {
+		correlationID = chimw.GetReqID(r.Context())
+	}
+	ctx := trace.WithCorrelationID(r.Context(), correlationID)
+	w.Header().Set("X-Correlation-ID", correlationID)
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	result, err := h.querySvc.ListByCausationID(ctx, query.CausationQuery{
+		EventID: rawID,
+		Limit:   limit,
+		Offset:  offset,
+	})
+	if err != nil {
+		h.log.Error("causation query failed",
+			"correlation_id", correlationID,
+			"event_id", rawID,
+			"error", err,
+		)
+		writeError(w, http.StatusInternalServerError, "causation query failed")
+		return
+	}
+
+	events := make([]EventResponse, len(result.Events))
+	for i, e := range result.Events {
+		events[i] = domainToEventResponse(e)
+	}
+
+	w.Header().Set("X-Read-Model", "postgres")
+	w.Header().Set("X-Data-Consistency", "strong")
+	writeJSON(w, http.StatusOK, CausationResponse{
+		SourceEventID: result.SourceEventID,
+		Events:        events,
+		Total:         result.Total,
+		Limit:         result.Limit,
+		Offset:        result.Offset,
+	})
+}
+
+// getTimeline godoc
+// @Summary      Tenant event timeline
+// @Description  Returns a paginated, occurred_at DESC list of all events for the caller's
+// @Description  tenant within an optional time window. Use this as the entry point for
+// @Description  incident reconstruction when a correlationId is not yet known (ADR-017).
+// @Description  Served from PostgreSQL (source of truth, strongly consistent).
+// @Tags         events
+// @Produce      json
+// @Security     ApiKeyAuth
+// @Security     BearerAuth
+// @Param        from_time  query     string  false  "Lower bound (inclusive), ISO-8601, e.g. 2026-04-21T10:00:00Z"
+// @Param        to_time    query     string  false  "Upper bound (inclusive), ISO-8601, e.g. 2026-04-21T11:00:00Z"
+// @Param        limit      query     int     false  "Page size — default 20, max 100"
+// @Param        offset     query     int     false  "Number of events to skip — default 0"
+// @Success      200        {object}  TimelineResponse
+// @Failure      400        {object}  ErrorResponse  "Invalid timestamp format"
+// @Failure      401        {object}  ErrorResponse  "Missing or invalid credentials"
+// @Failure      500        {object}  ErrorResponse  "Timeline query failed"
+// @Router       /events/timeline [get]
+func (h *handler) getTimeline(w http.ResponseWriter, r *http.Request) {
+	limit := parseIntParam(r, "limit", 20)
+	offset := parseIntParam(r, "offset", 0)
+
+	var fromTime, toTime time.Time
+	if s := r.URL.Query().Get("from_time"); s != "" {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "from_time must be an ISO-8601 timestamp (e.g. 2026-04-21T10:00:00Z)")
+			return
+		}
+		fromTime = t
+	}
+	if s := r.URL.Query().Get("to_time"); s != "" {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "to_time must be an ISO-8601 timestamp (e.g. 2026-04-21T10:00:00Z)")
+			return
+		}
+		toTime = t
+	}
+
+	correlationID := r.Header.Get("X-Correlation-ID")
+	if correlationID == "" {
+		correlationID = chimw.GetReqID(r.Context())
+	}
+	ctx := trace.WithCorrelationID(r.Context(), correlationID)
+	w.Header().Set("X-Correlation-ID", correlationID)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	result, err := h.querySvc.GetTimeline(ctx, query.TimelineQuery{
+		FromTime: fromTime,
+		ToTime:   toTime,
+		Limit:    limit,
+		Offset:   offset,
+	})
+	if err != nil {
+		h.log.Error("timeline query failed",
+			"correlation_id", correlationID,
+			"from_time", fromTime,
+			"to_time", toTime,
+			"error", err,
+		)
+		writeError(w, http.StatusInternalServerError, "timeline query failed")
+		return
+	}
+
+	events := make([]EventResponse, len(result.Events))
+	for i, e := range result.Events {
+		events[i] = domainToEventResponse(e)
+	}
+
+	fromStr := ""
+	if !fromTime.IsZero() {
+		fromStr = fromTime.Format(time.RFC3339)
+	}
+	toStr := ""
+	if !toTime.IsZero() {
+		toStr = toTime.Format(time.RFC3339)
+	}
+
+	w.Header().Set("X-Read-Model", "postgres")
+	w.Header().Set("X-Data-Consistency", "strong")
+	writeJSON(w, http.StatusOK, TimelineResponse{
+		TenantID: result.TenantID,
+		Events:   events,
+		Total:    result.Total,
+		Limit:    result.Limit,
+		Offset:   result.Offset,
+		FromTime: fromStr,
+		ToTime:   toStr,
+	})
+}
+
 // parseIntParam reads an integer query parameter with a fallback default.
 // Returns the default if the param is absent, non-numeric, or negative.
 func parseIntParam(r *http.Request, key string, fallback int) int {
@@ -563,16 +865,26 @@ func parseIntParam(r *http.Request, key string, fallback int) int {
 // Keeping this mapping in the HTTP layer ensures the domain never leaks into the wire format.
 func domainToEventResponse(e *event.Event) EventResponse {
 	return EventResponse{
-		ID:            e.ID.String(),
-		TenantID:      e.TenantID,
-		StreamID:      e.StreamID,
-		Type:          e.Type,
-		Source:        e.Source,
-		Version:       e.Version,
-		OccurredAt:    e.OccurredAt,
-		CorrelationID: e.CorrelationID,
-		Payload:       e.Payload,
-		Metadata:      e.Metadata,
+		ID:                  e.ID.String(),
+		TenantID:            e.TenantID,
+		StreamID:            e.StreamID,
+		Type:                e.Type,
+		Source:              e.Source,
+		Version:             e.Version,
+		EventVersion:        e.EventVersion,
+		OccurredAt:          e.OccurredAt,
+		CorrelationID:       e.CorrelationID,
+		CausationID:         e.CausationID,
+		ActorID:             e.ActorID,
+		TraceID:             e.TraceID,
+		SourceVersion:       e.SourceVersion,
+		Payload:             e.Payload,
+		Metadata:            e.Metadata,
+		IsReplay:            e.IsReplay,
+		ReplayID:            e.ReplayID,
+		ReplayedAt:          e.ReplayedAt,
+		ReplayReason:        e.ReplayReason,
+		ReplaySourceEventID: e.ReplaySourceEventID,
 	}
 }
 

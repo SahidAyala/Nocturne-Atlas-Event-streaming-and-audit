@@ -42,6 +42,7 @@ import (
 	appauth "github.com/SheykoWk/event-streaming-and-audit/internal/application/auth"
 	"github.com/SheykoWk/event-streaming-and-audit/internal/application/ingest"
 	"github.com/SheykoWk/event-streaming-and-audit/internal/application/query"
+	"github.com/SheykoWk/event-streaming-and-audit/internal/application/replay"
 	"github.com/SheykoWk/event-streaming-and-audit/internal/config"
 	infraauth "github.com/SheykoWk/event-streaming-and-audit/internal/infrastructure/auth"
 	"github.com/SheykoWk/event-streaming-and-audit/internal/infrastructure/auth/jwt"
@@ -91,11 +92,12 @@ func main() {
 
 	ingestSvc := ingest.NewService(store, publisher, log)
 	querySvc := query.NewService(store, esIndexer, log)
+	replayEngine := replay.NewReplayEngine(store, publisher, log)
 
 	authenticator := buildAuthenticator(cfg.Auth, log)
 	issuer := buildIssuer(cfg.Auth, log)
 
-	router := httpserver.NewRouter(ingestSvc, querySvc, authenticator, issuer, cfg.Auth.AdminKey, log)
+	router := httpserver.NewRouter(ingestSvc, querySvc, replayEngine, authenticator, issuer, cfg.Auth.AdminKey, log)
 
 	srv := &http.Server{
 		Addr:         cfg.HTTPAddr,

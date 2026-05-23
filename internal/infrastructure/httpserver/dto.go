@@ -28,6 +28,77 @@ type IngestRequest struct {
 	Payload json.RawMessage `json:"payload,omitempty" swaggertype:"object"`
 	// Metadata is optional key-value metadata for routing or tracing.
 	Metadata map[string]string `json:"metadata,omitempty" example:"region:us-east-1,trace_id:abc-123"`
+
+	// Canonical envelope fields — all optional for backward compatibility.
+	// When present they are stored as first-class columns (not inside metadata)
+	// and indexed for cross-service correlation queries.
+
+	// EventVersion is the schema/contract version of this event type (default 1).
+	// Distinct from the stream version assigned by the store.
+	EventVersion int `json:"event_version,omitempty" example:"1"`
+	// CausationID is the ID of the upstream event that caused this one.
+	CausationID string `json:"causation_id,omitempty" example:"01906c2e-4a3b-7000-8000-abc123def456"`
+	// ActorID identifies who triggered the action (user UUID, "system", service name).
+	ActorID string `json:"actor_id,omitempty" example:"user-uuid"`
+	// TraceID is an optional W3C/B3 distributed trace ID.
+	TraceID string `json:"trace_id,omitempty" example:"4bf92f3577b34da6a3ce929d0e0e4736"`
+	// SourceVersion is the semantic version of the originating service.
+	SourceVersion string `json:"source_version,omitempty" example:"1.4.2"`
+}
+
+// ReplayFilterRequest is the filter part of a replay request body.
+type ReplayFilterRequest struct {
+	TenantID      string   `json:"tenant_id,omitempty"`
+	StreamID      string   `json:"stream_id,omitempty"`
+	CorrelationID string   `json:"correlation_id,omitempty"`
+	EventType     string   `json:"event_type,omitempty"`
+	ActorID       string   `json:"actor_id,omitempty"`
+	FromTime      string   `json:"from_time,omitempty"` // ISO-8601
+	ToTime        string   `json:"to_time,omitempty"`   // ISO-8601
+	EventIDs      []string `json:"event_ids,omitempty"`
+}
+
+// ReplayOptionsRequest is the options part of a replay request body.
+type ReplayOptionsRequest struct {
+	DryRun       bool   `json:"dry_run,omitempty"`
+	ReplayReason string `json:"replay_reason,omitempty"`
+	SafetyLimit  int    `json:"safety_limit,omitempty"`
+}
+
+// ReplayRequest is the request body for POST /replay.
+type ReplayRequest struct {
+	Filter  ReplayFilterRequest  `json:"filter"`
+	Options ReplayOptionsRequest `json:"options"`
+}
+
+// ReplayResponse is the response body for POST /replay.
+type ReplayResponse struct {
+	ReplayID      string          `json:"replay_id,omitempty"`
+	DryRun        bool            `json:"dry_run"`
+	MatchedCount  int             `json:"matched_count"`
+	ReplayedCount int             `json:"replayed_count"`
+	Events        []EventResponse `json:"events"`
+}
+
+// CausationResponse is the response body for GET /events/{id}/causes.
+type CausationResponse struct {
+	// SourceEventID is the event whose causation children are listed.
+	SourceEventID string          `json:"source_event_id"`
+	Events        []EventResponse `json:"events"`
+	Total         int64           `json:"total"`
+	Limit         int             `json:"limit"`
+	Offset        int             `json:"offset"`
+}
+
+// TimelineResponse is the response body for GET /events/timeline.
+type TimelineResponse struct {
+	TenantID string          `json:"tenant_id"`
+	Events   []EventResponse `json:"events"`
+	Total    int64           `json:"total"`
+	Limit    int             `json:"limit"`
+	Offset   int             `json:"offset"`
+	FromTime string          `json:"from_time,omitempty"`
+	ToTime   string          `json:"to_time,omitempty"`
 }
 
 // EventResponse is the full representation of a persisted event.
@@ -43,16 +114,33 @@ type EventResponse struct {
 	// Source is the service that produced the event.
 	Source string `json:"source" example:"orders-svc"`
 	// Version is monotonically increasing within the stream, assigned by the store.
+	// This is the stream sequence number — see EventVersion for the schema version.
 	Version int64 `json:"version" example:"1"`
+	// EventVersion is the schema/contract version of the event type (e.g. 1, 2).
+	EventVersion int `json:"event_version" example:"1"`
 	// OccurredAt is the UTC timestamp when the event occurred.
 	OccurredAt time.Time `json:"occurred_at" example:"2026-04-21T10:00:00Z"`
 	// CorrelationID is the request-scoped trace identifier from the original ingest request.
-	// Use it to correlate this event with the ingest log, the Postgres row, and the Elasticsearch document.
 	CorrelationID string `json:"correlation_id,omitempty" example:"01906c2e-4a3b-7000-8000-abc123def456"`
+	// CausationID is the ID of the upstream event that caused this one.
+	CausationID string `json:"causation_id,omitempty"`
+	// ActorID identifies who triggered the action.
+	ActorID string `json:"actor_id,omitempty"`
+	// TraceID is the W3C trace ID (32 lowercase hex chars). Maps to an OTel trace ID.
+	TraceID string `json:"trace_id,omitempty"`
+	// SourceVersion is the semantic version of the originating service.
+	SourceVersion string `json:"source_version,omitempty"`
 	// Payload is the arbitrary JSON payload, returned as raw JSON.
 	Payload json.RawMessage `json:"payload,omitempty" swaggertype:"object"`
 	// Metadata is the key-value metadata attached to the event.
 	Metadata map[string]string `json:"metadata,omitempty"`
+
+	// Replay fields — only present on events created by POST /replay (ADR-015).
+	IsReplay            bool       `json:"is_replay,omitempty"`
+	ReplayID            string     `json:"replay_id,omitempty"`
+	ReplayedAt          *time.Time `json:"replayed_at,omitempty"`
+	ReplayReason        string     `json:"replay_reason,omitempty"`
+	ReplaySourceEventID string     `json:"replay_source_event_id,omitempty"`
 }
 
 // CreateTenantRequest is the request body for POST /tenants.

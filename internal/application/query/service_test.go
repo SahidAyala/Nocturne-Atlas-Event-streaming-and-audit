@@ -70,6 +70,18 @@ func (m *mockStore) ListByCorrelationID(_ context.Context, tenantID, correlation
 	return matched[offset:min(offset+limit, len(matched))], total, nil
 }
 
+func (m *mockStore) ListByCausationID(_ context.Context, _, _ string, _, _ int) ([]*event.Event, int64, error) {
+	return nil, 0, nil
+}
+
+func (m *mockStore) ListTimeline(_ context.Context, _ string, _, _ time.Time, _, _ int) ([]*event.Event, int64, error) {
+	return nil, 0, nil
+}
+
+func (m *mockStore) QueryForReplay(_ context.Context, _ event.ReplayFilter, _ int) ([]*event.Event, error) {
+	return nil, nil
+}
+
 // ---------------------------------------------------------------------------
 // mockSearcher — in-memory event.Searcher.
 // ---------------------------------------------------------------------------

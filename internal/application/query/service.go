@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -204,6 +205,123 @@ func (s *Service) QueryByStream(ctx context.Context, q StreamQuery) (*Result, er
 		Limit:     q.Limit,
 		Offset:    q.Offset,
 		ReadModel: "elasticsearch",
+	}, nil
+}
+
+// CausationQuery carries parameters for listing events caused by a given event.
+type CausationQuery struct {
+	// EventID is the causation_id to look up — returns events whose causation_id equals this.
+	EventID string
+	Limit   int
+	Offset  int
+}
+
+// CausationResult is the paginated response from ListByCausationID.
+type CausationResult struct {
+	SourceEventID string
+	Events        []*event.Event
+	Total         int64
+	Limit         int
+	Offset        int
+}
+
+// TimelineQuery carries parameters for tenant timeline reconstruction.
+type TimelineQuery struct {
+	FromTime time.Time // zero = no lower bound
+	ToTime   time.Time // zero = no upper bound
+	Limit    int
+	Offset   int
+}
+
+// TimelineResult is the paginated response from GetTimeline.
+type TimelineResult struct {
+	TenantID string
+	Events   []*event.Event
+	Total    int64
+	Limit    int
+	Offset   int
+}
+
+// ListByCausationID returns events whose causation_id equals q.EventID, scoped to the
+// caller's tenant, ordered by occurred_at ASC. Used to traverse causation trees (ADR-017).
+func (s *Service) ListByCausationID(ctx context.Context, q CausationQuery) (*CausationResult, error) {
+	identity, ok := appauth.IdentityFromContext(ctx)
+	if !ok || identity.TenantID == "" {
+		return nil, fmt.Errorf("unauthenticated: identity with tenant_id is required")
+	}
+	if q.EventID == "" {
+		return nil, fmt.Errorf("event_id is required")
+	}
+	if q.Limit <= 0 {
+		q.Limit = defaultLimit
+	}
+	if q.Limit > maxLimit {
+		q.Limit = maxLimit
+	}
+	if q.Offset < 0 {
+		q.Offset = 0
+	}
+
+	events, total, err := s.store.ListByCausationID(ctx, identity.TenantID, q.EventID, q.Limit, q.Offset)
+	if err != nil {
+		s.log.Error("list by causation_id failed",
+			"correlation_id", trace.FromContext(ctx),
+			"event_id", q.EventID,
+			"tenant_id", identity.TenantID,
+			"error", err,
+		)
+		return nil, fmt.Errorf("list events by causation_id: %w", err)
+	}
+	if events == nil {
+		events = []*event.Event{}
+	}
+	return &CausationResult{
+		SourceEventID: q.EventID,
+		Events:        events,
+		Total:         total,
+		Limit:         q.Limit,
+		Offset:        q.Offset,
+	}, nil
+}
+
+// GetTimeline returns a paginated, occurred_at DESC slice of all events for the caller's
+// tenant within an optional time window. Used for incident reconstruction when a
+// correlationId is unknown (ADR-017). Results come from PostgreSQL (source of truth).
+func (s *Service) GetTimeline(ctx context.Context, q TimelineQuery) (*TimelineResult, error) {
+	identity, ok := appauth.IdentityFromContext(ctx)
+	if !ok || identity.TenantID == "" {
+		return nil, fmt.Errorf("unauthenticated: identity with tenant_id is required")
+	}
+	if q.Limit <= 0 {
+		q.Limit = defaultLimit
+	}
+	if q.Limit > maxLimit {
+		q.Limit = maxLimit
+	}
+	if q.Offset < 0 {
+		q.Offset = 0
+	}
+
+	events, total, err := s.store.ListTimeline(ctx, identity.TenantID, q.FromTime, q.ToTime, q.Limit, q.Offset)
+	if err != nil {
+		s.log.Error("timeline query failed",
+			"correlation_id", trace.FromContext(ctx),
+			"tenant_id", identity.TenantID,
+			"from_time", q.FromTime,
+			"to_time", q.ToTime,
+			"error", err,
+		)
+		return nil, fmt.Errorf("list timeline: %w", err)
+	}
+	if events == nil {
+		events = []*event.Event{}
+	}
+	return &TimelineResult{
+		TenantID: identity.TenantID,
+		Events:   events,
+		Total:    total,
+		Limit:    q.Limit,
+		Offset:   q.Offset,
 	}, nil
 }
 

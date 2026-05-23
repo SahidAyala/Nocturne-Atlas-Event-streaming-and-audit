@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -104,6 +105,64 @@ func (m *mockStore) ListByCorrelationID(_ context.Context, tenantID, correlation
 		end = len(matched)
 	}
 	return matched[offset:end], total, nil
+}
+
+func (m *mockStore) ListByCausationID(_ context.Context, tenantID, causationID string, limit, offset int) ([]*event.Event, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var matched []*event.Event
+	for _, e := range m.events {
+		if e.TenantID == tenantID && e.CausationID == causationID {
+			cp := *e
+			matched = append(matched, &cp)
+		}
+	}
+	total := int64(len(matched))
+	if offset >= len(matched) {
+		return []*event.Event{}, total, nil
+	}
+	end := offset + limit
+	if end > len(matched) {
+		end = len(matched)
+	}
+	return matched[offset:end], total, nil
+}
+
+func (m *mockStore) ListTimeline(_ context.Context, tenantID string, _, _ time.Time, limit, offset int) ([]*event.Event, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var matched []*event.Event
+	for _, e := range m.events {
+		if e.TenantID == tenantID {
+			cp := *e
+			matched = append(matched, &cp)
+		}
+	}
+	total := int64(len(matched))
+	if offset >= len(matched) {
+		return []*event.Event{}, total, nil
+	}
+	end := offset + limit
+	if end > len(matched) {
+		end = len(matched)
+	}
+	return matched[offset:end], total, nil
+}
+
+func (m *mockStore) QueryForReplay(_ context.Context, f event.ReplayFilter, safetyLimit int) ([]*event.Event, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var matched []*event.Event
+	for _, e := range m.events {
+		if f.TenantID != "" && e.TenantID != f.TenantID {
+			continue
+		}
+		matched = append(matched, e)
+		if len(matched) > safetyLimit {
+			return nil, event.ErrReplayLimitExceeded
+		}
+	}
+	return matched, nil
 }
 
 // count returns how many events are stored for the given stream.

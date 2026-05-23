@@ -25,6 +25,14 @@ type Command struct {
 	// request header, the chi-generated X-Request-Id, or a freshly generated UUID.
 	// It is always non-empty when produced by handler.ingest.
 	CorrelationID string
+
+	// Canonical envelope fields — propagated from the originating platform event.
+	// EventVersion is the schema/contract version; defaults to 1 when absent.
+	EventVersion  int
+	CausationID   string
+	ActorID       string
+	TraceID       string
+	SourceVersion string
 }
 
 // Service orchestrates event ingestion: store first, then publish.
@@ -61,6 +69,15 @@ func (s *Service) Ingest(ctx context.Context, cmd Command) (*event.Event, error)
 
 	e := event.New(cmd.StreamID, cmd.Type, cmd.Source, cmd.CorrelationID, cmd.Payload, cmd.Metadata)
 	e.TenantID = identity.TenantID
+	// Propagate canonical envelope fields from the ingest command.
+	// These arrive from the originating platform event via the outbox forwarding path.
+	if cmd.EventVersion > 0 {
+		e.EventVersion = cmd.EventVersion
+	}
+	e.CausationID = cmd.CausationID
+	e.ActorID = cmd.ActorID
+	e.TraceID = cmd.TraceID
+	e.SourceVersion = cmd.SourceVersion
 
 	if err := s.store.Append(ctx, e); err != nil {
 		return nil, fmt.Errorf("append to store: %w", err)

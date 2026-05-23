@@ -3,12 +3,27 @@ package event
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 // ErrNotFound is returned by Store.GetByID when no event matches the given UUID.
 var ErrNotFound = errors.New("event not found")
+
+// ReplayFilter specifies which events to include in a replay or query.
+// At least one of TenantID or EventIDs must be set.
+// All non-zero fields are AND-ed together.
+type ReplayFilter struct {
+	TenantID      string
+	StreamID      string    // optional: narrow to a specific stream
+	CorrelationID string    // optional: all events with this correlationId
+	EventType     string    // optional: filter by event type
+	ActorID       string    // optional: filter by actor
+	FromTime      time.Time // optional zero = no lower bound
+	ToTime        time.Time // optional zero = no upper bound
+	EventIDs      []string  // optional: replay specific events by UUID
+}
 
 // Store is the outbound port for the append-only event store.
 // Append must set e.Version to the DB-assigned value before returning.
@@ -22,7 +37,22 @@ type Store interface {
 	// ListByCorrelationID returns a paginated, occurred_at DESC slice of events matching
 	// tenantID and correlationID. total is the unfiltered count (for pagination).
 	ListByCorrelationID(ctx context.Context, tenantID, correlationID string, limit, offset int) ([]*Event, int64, error)
+	// ListByCausationID returns all events whose causation_id matches the given eventID,
+	// scoped to tenantID, ordered by occurred_at ASC. Used for causation-tree traversal.
+	ListByCausationID(ctx context.Context, tenantID, causationID string, limit, offset int) ([]*Event, int64, error)
+	// ListTimeline returns a paginated, occurred_at DESC slice of all events for a tenant
+	// within an optional time range. Both fromTime and toTime are inclusive; zero values mean
+	// no bound. Used for tenant timeline reconstruction (ADR-017).
+	ListTimeline(ctx context.Context, tenantID string, fromTime, toTime time.Time, limit, offset int) ([]*Event, int64, error)
+	// QueryForReplay returns up to safetyLimit events matching the filter, ordered by
+	// occurred_at ASC. Used by the replay engine (ADR-015). Returns ErrReplayLimitExceeded
+	// if the filter would match more events than safetyLimit allows.
+	QueryForReplay(ctx context.Context, f ReplayFilter, safetyLimit int) ([]*Event, error)
 }
+
+// ErrReplayLimitExceeded is returned by Store.QueryForReplay when the filter matches
+// more events than the safetyLimit parameter. Callers must narrow the filter.
+var ErrReplayLimitExceeded = errors.New("replay filter matched more events than the safety limit")
 
 // Publisher is the outbound port for the event bus.
 // Implementations should treat Publish as best-effort: the event is

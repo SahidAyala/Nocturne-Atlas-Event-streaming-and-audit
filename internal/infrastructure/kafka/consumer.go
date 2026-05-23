@@ -11,6 +11,7 @@ import (
 
 	"github.com/SheykoWk/event-streaming-and-audit/internal/config"
 	"github.com/SheykoWk/event-streaming-and-audit/internal/domain/event"
+	"github.com/SheykoWk/event-streaming-and-audit/internal/pkg/trace"
 )
 
 // Consumer reads events from a Kafka topic using consumer-group offset management.
@@ -53,6 +54,23 @@ func (c *Consumer) Run(ctx context.Context, handle func(context.Context, *event.
 			return fmt.Errorf("fetch message: %w", err)
 		}
 
+		// Extract W3C TraceContext and correlation ID from Kafka headers and attach
+		// them to the message context so handler logs are automatically correlated
+		// with the originating HTTP request (ADR-014).
+		msgCtx := ctx
+		for _, h := range msg.Headers {
+			switch h.Key {
+			case "traceparent":
+				if tc, ok := trace.ParseTraceparent(string(h.Value)); ok {
+					msgCtx = trace.WithTraceContext(msgCtx, tc)
+				}
+			case "correlation_id":
+				if v := string(h.Value); v != "" {
+					msgCtx = trace.WithCorrelationID(msgCtx, v)
+				}
+			}
+		}
+
 		var e event.Event
 		if err := json.Unmarshal(msg.Value, &e); err != nil {
 			c.log.Warn("skipping malformed message",
@@ -60,6 +78,8 @@ func (c *Consumer) Run(ctx context.Context, handle func(context.Context, *event.
 				"partition", msg.Partition,
 				"offset", msg.Offset,
 				"message_key", string(msg.Key),
+				"trace_id", trace.TraceIDFromContext(msgCtx),
+				"correlation_id", trace.FromContext(msgCtx),
 				"payload_preview", payloadPreview(msg.Value, 200),
 				"error", err,
 			)
@@ -70,15 +90,14 @@ func (c *Consumer) Run(ctx context.Context, handle func(context.Context, *event.
 			continue
 		}
 
-		if err := handle(ctx, &e); err != nil {
+		if err := handle(msgCtx, &e); err != nil {
 			// Do not commit — restart will reprocess from this offset.
-			// Log structured fields here because the caller (main.go) only
-			// receives the wrapped error string and loses all context.
 			c.log.Error("handler rejected event — consumer stopping",
 				"event_id", e.ID,
 				"stream_id", e.StreamID,
 				"version", e.Version,
-				"correlation_id", e.CorrelationID,
+				"trace_id", trace.TraceIDFromContext(msgCtx),
+				"correlation_id", trace.FromContext(msgCtx),
 				"error", err,
 			)
 			return fmt.Errorf("handle event %s: %w", e.ID, err)

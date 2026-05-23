@@ -10,6 +10,7 @@ import (
 
 	"github.com/SheykoWk/event-streaming-and-audit/internal/config"
 	"github.com/SheykoWk/event-streaming-and-audit/internal/domain/event"
+	"github.com/SheykoWk/event-streaming-and-audit/internal/pkg/trace"
 )
 
 // Producer publishes events to Kafka, routing each message to the topic
@@ -49,16 +50,34 @@ func (p *Producer) Publish(ctx context.Context, e *event.Event) error {
 		return fmt.Errorf("marshal event: %w", err)
 	}
 
+	headers := []kafkago.Header{
+		{Key: "event_id", Value: []byte(e.ID.String())},
+		{Key: "event_type", Value: []byte(e.Type)},
+		{Key: "source", Value: []byte(e.Source)},
+	}
+	// Propagate W3C TraceContext so consumers can correlate Kafka processing with the
+	// originating HTTP request span (ADR-014). The producer generates a fresh span ID
+	// to represent the "publish" act as a logical child of the ingest handler span.
+	if e.TraceID != "" {
+		tc := trace.TraceContext{TraceID: e.TraceID, Sampled: true}
+		headers = append(headers, kafkago.Header{
+			Key:   "traceparent",
+			Value: []byte(tc.Traceparent(trace.NewSpanID())),
+		})
+	}
+	if e.CorrelationID != "" {
+		headers = append(headers, kafkago.Header{
+			Key:   "correlation_id",
+			Value: []byte(e.CorrelationID),
+		})
+	}
+
 	msg := kafkago.Message{
-		Topic: p.resolver.Resolve(e), // routing decision is here, not in the writer
-		Key:   []byte(e.StreamID),
-		Value: payload,
-		Time:  e.OccurredAt,
-		Headers: []kafkago.Header{
-			{Key: "event_id", Value: []byte(e.ID.String())},
-			{Key: "event_type", Value: []byte(e.Type)},
-			{Key: "source", Value: []byte(e.Source)},
-		},
+		Topic:   p.resolver.Resolve(e),
+		Key:     []byte(e.StreamID),
+		Value:   payload,
+		Time:    e.OccurredAt,
+		Headers: headers,
 	}
 
 	if err := p.writer.WriteMessages(ctx, msg); err != nil {

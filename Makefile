@@ -10,7 +10,7 @@ dev:
 	@echo ""
 	@echo "🚀 Starting ingest-api locally..."
 	@ELASTICSEARCH_ADDRS=http://localhost:9200 \
-	 POSTGRES_DSN=postgres://events:events@localhost:5433/events?sslmode=disable \
+	 POSTGRES_DSN=postgres://events:events@localhost:5434/events?sslmode=disable \
 	 KAFKA_BROKERS=localhost:9094 \
 	 go run ./cmd/ingest-api
 

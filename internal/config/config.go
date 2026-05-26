@@ -4,6 +4,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -29,6 +30,14 @@ type AuthConfig struct {
 
 type PostgresConfig struct {
 	DSN string
+
+	// Pool size limits. Defaults are chosen to be safe for a single-process
+	// deployment; set POSTGRES_POOL_MAX lower when running multiple instances
+	// on the same database to avoid exhausting max_connections.
+	// Rule: (PoolMax × instance_count) must be < 80% of postgres max_connections.
+	PoolMax            int           // POSTGRES_POOL_MAX, default 20
+	PoolMin            int           // POSTGRES_POOL_MIN, default 2
+	PoolMaxConnIdleTime time.Duration // POSTGRES_POOL_IDLE_SECS, default 5m
 }
 
 // KafkaConfig holds all Kafka-related settings.
@@ -84,7 +93,10 @@ func Load() *Config {
 		HTTPAddr: getEnv("HTTP_ADDR", ":8080"),
 		GRPCAddr: getEnv("GRPC_ADDR", ":50051"),
 		Postgres: PostgresConfig{
-			DSN: getEnv("POSTGRES_DSN", "postgres://events:events@localhost:5433/events?sslmode=disable"),
+			DSN:                 getEnv("POSTGRES_DSN", "postgres://events:events@localhost:5433/events?sslmode=disable"),
+			PoolMax:             getEnvInt("POSTGRES_POOL_MAX", 20),
+			PoolMin:             getEnvInt("POSTGRES_POOL_MIN", 2),
+			PoolMaxConnIdleTime: getEnvDuration("POSTGRES_POOL_IDLE_SECS", 300) * time.Second,
 		},
 		Kafka: KafkaConfig{
 			Brokers:  strings.Split(getEnv("KAFKA_BROKERS", "localhost:9094"), ","),
@@ -127,6 +139,18 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func getEnvDuration(key string, fallbackSeconds int) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return time.Duration(fallbackSeconds)
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return time.Duration(fallbackSeconds)
+	}
+	return time.Duration(n)
 }
 
 // parseTopicRoutes parses KAFKA_TOPIC_ROUTES into a map.

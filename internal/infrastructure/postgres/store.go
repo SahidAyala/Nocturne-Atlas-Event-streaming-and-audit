@@ -73,7 +73,21 @@ type EventStore struct {
 }
 
 func NewEventStore(ctx context.Context, cfg config.PostgresConfig) (*EventStore, error) {
-	pool, err := pgxpool.New(ctx, cfg.DSN)
+	poolCfg, err := pgxpool.ParseConfig(cfg.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("parse postgres config: %w", err)
+	}
+	if cfg.PoolMax > 0 {
+		poolCfg.MaxConns = int32(cfg.PoolMax)
+	}
+	if cfg.PoolMin > 0 {
+		poolCfg.MinConns = int32(cfg.PoolMin)
+	}
+	if cfg.PoolMaxConnIdleTime > 0 {
+		poolCfg.MaxConnIdleTime = cfg.PoolMaxConnIdleTime
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect postgres: %w", err)
 	}

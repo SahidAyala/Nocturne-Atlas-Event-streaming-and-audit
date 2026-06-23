@@ -48,6 +48,8 @@ type Indexer struct {
 func NewIndexer(cfg config.ElasticsearchConfig) (*Indexer, error) {
 	client, err := elasticsearch.NewClient(elasticsearch.Config{
 		Addresses: cfg.Addresses,
+		Username:  cfg.Username,
+		Password:  cfg.Password,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create elasticsearch client: %w", err)

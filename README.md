@@ -1,167 +1,146 @@
-# Event Streaming & Audit Platform
+# Nocturne Atlas — Event Streaming & Audit
 
-A distributed event streaming platform built in Go with hexagonal architecture.
-Events are stored append-only in PostgreSQL (source of truth), streamed via Kafka, and indexed into Elasticsearch for queries. Replay reads directly from PostgreSQL, guaranteeing integrity even if Kafka or Elasticsearch are stale.
+A production-grade, append-only event streaming platform that gives you durable event ingestion, a Kafka-based fan-out, an Elasticsearch read model, and an auditable replay engine — all as a single self-contained Go service.
+
+[![CI](https://github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/actions/workflows/ci.yml/badge.svg)](https://github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/actions/workflows/ci.yml)
+[![Go 1.24](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go)](https://golang.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
-## Architecture
+## Why This Exists
+
+Most systems bolt on event streaming as an afterthought — Kafka or a message bus becomes the source of truth, events are lost when consumers are down, and auditing requires piecing together logs from multiple systems.
+
+This platform flips that model:
+
+- **PostgreSQL is always the source of truth.** Events are durable the moment `POST /events` returns `201`. Kafka and Elasticsearch are projections that can be rebuilt at any time.
+- **Replay is first-class.** Any event or time window can be replayed from PostgreSQL into the pipeline without modifying the original data.
+- **Every event is traceable.** Correlation IDs, causation IDs, W3C trace IDs, and actor IDs are stored on every event, enabling full causal-chain reconstruction after an incident.
+
+---
+
+## Key Features
+
+- **Append-only event store** backed by PostgreSQL with per-stream monotonic versioning
+- **Kafka fan-out** with best-effort publish semantics — Kafka failures never lose events
+- **Dead-letter queue** for failed Elasticsearch indexing — no silent data loss
+- **Elasticsearch read model** for efficient stream queries
+- **Replay engine** with dry-run support — preview before re-ingesting
+- **Causation and correlation tracking** — traverse causal chains across services
+- **Multi-tenant** — tenant isolation enforced at every database query
+- **Three auth modes** — `none` (dev), API key, or HMAC-HS256 JWT
+- **Embedded Swagger UI** — interactive API docs with no separate container
+- **gRPC replay service** — streaming ordered events directly from PostgreSQL
+
+---
+
+## Architecture Overview
 
 ```
 HTTP POST /events
       │
       ▼
- ingest-api  ──► PostgreSQL (source of truth)
+ ingest-api ──► PostgreSQL (source of truth, append-only)
       │
-      └──► Kafka  (best-effort, async publish)
+      └──► Kafka events.v1 (best-effort, async)
                 │
                 ▼
        consumer-service
                 │
-          ┌─────┴─────┐
-          ▼           ▼
-  Elasticsearch    DLQ topic
-  (read model)   (failed index)
+          ┌─────┴──────────┐
+          ▼                ▼
+  Elasticsearch       events.v1.dlq
+  (read model)        (failed ops)
 
-HTTP GET /events/:streamID ──► Elasticsearch (eventually consistent)
-gRPC Replay ─────────────────► PostgreSQL   (strongly consistent)
+HTTP GET /events/:streamID ──► Elasticsearch (eventual consistency)
+HTTP GET /events/:id       ──► PostgreSQL    (strong consistency)
+gRPC ReplayStream          ──► PostgreSQL    (strong consistency)
 ```
 
-### Services
+Three binaries, one Docker image (build-arg selects the binary):
 
-| Binary | Responsibility |
-|---|---|
-| `cmd/ingest-api` | HTTP API — ingest events, serve read model |
-| `cmd/consumer-service` | Kafka consumer — index into Elasticsearch, route failures to DLQ |
-| `cmd/replay-service` | gRPC server — replay ordered events from PostgreSQL |
-
----
-
-## Prerequisites
-
-- **Go 1.24+**
-- **Docker + Docker Compose**
-- `pg_isready`, `nc`, `curl` available in your PATH (standard on macOS/Linux)
-
----
-
-## Getting Started
-
-There are two modes depending on what you're doing:
-
-| Mode | Command | Use when |
+| Binary | Port | Responsibility |
 |---|---|---|
-| **Dev** | `make dev` | Writing code — fast iteration, `go run` locally |
-| **Full stack** | `make dev-full` | Integration testing, demos, or production-like validation |
+| `cmd/ingest-api` | `8080` (HTTP), `50051` (gRPC) | Ingest, query, replay HTTP API + gRPC replay |
+| `cmd/consumer-service` | — | Kafka → Elasticsearch indexer + DLQ router |
+| `cmd/replay-service` | `50051` (gRPC) | Standalone gRPC replay server (optional) |
+
+See [docs/architecture.md](docs/architecture.md) for the full architectural breakdown including layer boundaries, data flow, storage model, and deployment topology.
 
 ---
 
-### Mode 1 — Dev (recommended for day-to-day coding)
+## Quick Start
 
-Infrastructure runs in Docker. Application services run locally with `go run` so you get fast reloads without rebuilding images.
+Get from `git clone` to a working system in under 5 minutes.
 
-**Terminal 1 — API:**
-
-```bash
-make dev
-```
-
-This starts Postgres, Kafka, Elasticsearch, and MinIO in Docker, waits for all healthchecks to pass, then launches `ingest-api` locally on `:8080`.
-
-**Terminal 2 — Consumer** (needed for `GET /events` to return results):
+**Prerequisites:** Go 1.24+, Docker, Docker Compose
 
 ```bash
-make dev-consumer
-```
+# 1. Clone
+git clone https://github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit.git
+cd Nocturne-Atlas-Event-streaming-and-audit
 
-Starts the same infra (no-op if already running) and launches `consumer-service` locally.
+# 2. Configure (defaults work out of the box)
+cp .env.example .env
 
-**Apply migrations** (first time, or after adding new migration files):
+# 3. Start everything
+make dev-full
 
-```bash
+# 4. Apply database migrations (first time only)
 make migrate
-```
 
-> Migrations run against `localhost:5433` by default. Only pending files are applied — already-applied ones are skipped.
-
-**Verify:**
-
-```bash
+# 5. Verify the full pipeline
 make test-e2e
 ```
 
+The stack is ready when you see the `ingest-api` health check pass.
+
 ---
 
-### Mode 2 — Full stack (production-like)
+## Running Locally
 
-Everything runs in Docker — infrastructure and application services. No local Go needed after `make dev-full`.
+### Mode 1 — Dev (recommended for day-to-day coding)
 
-```bash
-make dev-full
-```
-
-Builds the Go binaries inside Docker and starts all services with live logs in the foreground. Services start in dependency order via healthcheck-gated `depends_on`.
-
-To run in the background instead:
+Infrastructure in Docker, application services run locally with `go run` for fast iteration.
 
 ```bash
-make up        # detached
-make logs      # follow logs
-make down      # stop everything
+# Terminal 1 — start infrastructure + ingest-api
+make dev
+
+# Terminal 2 — start Kafka consumer (needed for GET /events to return results)
+make dev-consumer
+
+# Apply migrations on first run
+make migrate
 ```
 
-Ports exposed on the host:
+### Mode 2 — Full stack (integration testing and demos)
+
+Everything in Docker, production-like:
+
+```bash
+make dev-full          # foreground (shows all logs)
+# or
+make up && make logs   # detached
+```
+
+### Service ports
 
 | Service | Port | Notes |
 |---|---|---|
 | `ingest-api` | `8080` | HTTP API + Swagger UI |
-| `postgres` | `5433` | 5432 is reserved for a local Postgres instance |
-| `kafka` | `9094` | External listener for local tooling |
-| `elasticsearch` | `9200` | REST API |
-| `minio` | `9000` / `9001` | S3 API / Console UI |
+| PostgreSQL | `5434` | Exposed as `5434` to avoid conflicts with a local Postgres on `5432` |
+| Kafka | `9094` | External listener for host-side tooling |
+| Elasticsearch | `9200` | REST API |
+| Kafka UI | `8081` | Browse topics and messages |
+| Kibana | `5601` | Explore the events index |
+| MinIO | `9000` / `9001` | S3 API / Console |
 
-> **Why port 5433?** Docker maps PostgreSQL to `5433` to avoid conflicts with a local Postgres on `5432`. Inside the Docker network services always connect to `postgres:5432`.
-
----
-
-## Database Migrations
-
-Migrations live in `db/migrations/` as numbered SQL files (`001_create_events.sql`, `002_...sql`, …). They are embedded into the `migrate` binary at build time.
+### Verify it works
 
 ```bash
-# Apply all pending migrations
-make migrate
-
-# Against a custom DSN
-POSTGRES_DSN=postgres://user:pass@host:5432/db make migrate
-```
-
-The runner creates a `schema_migrations` table to track which files have been applied. Each migration runs in its own transaction — if it fails, nothing is committed.
-
-To add a new migration, create the next numbered file:
-
-```bash
-touch db/migrations/002_add_my_column.sql
-# edit the file, then:
-make migrate
-```
-
----
-
-## Verify It Works
-
-Once the API is running (either mode), run the end-to-end smoke test:
-
-```bash
-make test-e2e
-```
-
-This validates the full pipeline: **POST /events → PostgreSQL → Kafka → consumer-service → Elasticsearch → GET /events/{streamID}**.
-
-Or manually with curl:
-
-```bash
-# 1. Ingest an event
+# Ingest an event
 curl -X POST http://localhost:8080/events \
   -H "X-API-Key: dev-api-key" \
   -H "Content-Type: application/json" \
@@ -172,86 +151,185 @@ curl -X POST http://localhost:8080/events \
     "payload":   {"amount": 99.99, "currency": "USD"}
   }'
 
-# 2. Wait ~3s for the Kafka → Elasticsearch pipeline, then query
+# Wait ~3s for Kafka → consumer → Elasticsearch, then query
 sleep 3
 curl http://localhost:8080/events/order:1 \
   -H "X-API-Key: dev-api-key"
 ```
 
-> **Eventual consistency:** `GET /events/{streamID}` reads from Elasticsearch. Recently ingested events may not appear immediately — the consumer processes them asynchronously via Kafka. Events are always durable in PostgreSQL the moment `POST /events` returns `201`.
+Or run the automated smoke test:
+
+```bash
+make test-e2e
+```
+
+### Swagger UI
+
+Interactive API docs are available at `http://localhost:8080/swagger/index.html`.
+
+To authenticate: click **Authorize** → enter `dev-api-key` → click **Authorize**.
 
 ---
 
-## Swagger UI
+## Configuration
 
-Interactive API docs are served by `ingest-api` at:
-
-```
-http://localhost:8080/swagger/index.html
-```
-
-To authenticate in the UI:
-
-1. Click **Authorize** (top right)
-2. Enter `dev-api-key` in the **ApiKeyAuth** field
-3. Click **Authorize** → **Close**
-
-All `/events` endpoints are now unlocked. No separate container needed.
-
----
-
-## Authentication
-
-All `/events` endpoints require authentication. `/health` and `/swagger` are public.
-
-### Simple mode (default — dev)
-
-Pass the API key via the `X-API-Key` header:
+All configuration is via environment variables. Copy `.env.example` to `.env` and adjust.
 
 ```bash
-curl -X POST http://localhost:8080/events \
-  -H "X-API-Key: dev-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{"stream_id":"order:1","type":"order.created","source":"orders-svc","payload":{}}'
+cp .env.example .env
 ```
 
-Configured via `AUTH_API_KEY` env var (default: `dev-api-key`).
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `HTTP_ADDR` | No | `:8080` | HTTP listen address |
+| `GRPC_ADDR` | No | `:50051` | gRPC listen address |
+| `POSTGRES_DSN` | No | `postgres://events:events@localhost:5434/events?sslmode=disable` | PostgreSQL connection string |
+| `POSTGRES_POOL_MAX` | No | `20` | Maximum DB connections per instance |
+| `POSTGRES_POOL_MIN` | No | `2` | Minimum DB connections kept alive |
+| `POSTGRES_POOL_IDLE_SECS` | No | `300` | Seconds before idle connections are closed |
+| `KAFKA_BROKERS` | No | `localhost:9094` | Comma-separated Kafka broker addresses |
+| `KAFKA_TOPIC` | No | `events.v1` | Main events topic |
+| `KAFKA_DLQ_TOPIC` | No | _(auto)_ | DLQ topic — defaults to `KAFKA_TOPIC + ".dlq"` |
+| `KAFKA_GROUP_ID` | No | `consumer-service` | Kafka consumer group ID |
+| `KAFKA_TOPIC_PARTITIONS` | No | `6` | Partition count for newly created topics |
+| `KAFKA_TOPIC_REPLICATION` | No | `1` | Replication factor (use `3` in production) |
+| `KAFKA_TOPIC_ROUTES` | No | _(empty)_ | Domain routing: `order:events.order.v1,user:events.user.v1` |
+| `ELASTICSEARCH_ADDRS` | No | `http://localhost:9200` | Comma-separated Elasticsearch node addresses |
+| `ELASTICSEARCH_INDEX` | No | `events` | Elasticsearch index name |
+| `ELASTICSEARCH_USERNAME` | No | _(empty)_ | Elasticsearch username (if security enabled) |
+| `ELASTICSEARCH_PASSWORD` | No | _(empty)_ | Elasticsearch password (if security enabled) |
+| `AUTH_MODE` | No | `none` | `none` \| `simple` \| `jwt` |
+| `AUTH_API_KEY` | No | `dev-api-key` | API key for `simple` mode |
+| `AUTH_JWT_SECRET` | **Yes (jwt mode)** | _(empty)_ | HMAC-HS256 secret — minimum 32 random bytes |
+| `ADMIN_KEY` | No | `admin-secret` | Protects `POST /tenants` — change in production |
 
-### JWT mode (production / multi-tenant)
-
-Set in `.env` or as env vars:
+### Auth modes
 
 ```bash
+# No auth (dev/demo — never use in production)
+AUTH_MODE=none
+
+# API key (single-tenant or trusted-network)
+AUTH_MODE=simple
+AUTH_API_KEY=your-api-key
+
+# JWT (multi-tenant production)
 AUTH_MODE=jwt
 AUTH_JWT_SECRET=change-me-use-at-least-32-random-characters
 ```
 
-**Bootstrap a new tenant** (one-time per tenant):
+---
+
+## Architecture
+
+See [docs/architecture.md](docs/architecture.md) for the full document. Key points:
+
+**Request flow:**
+
+1. `POST /events` hits `ingest-api`
+2. Auth middleware validates credentials and places an `Identity` (with `tenant_id`) in context
+3. `ingest.Service` validates fields, creates the domain `Event`, calls `store.Append()` (PostgreSQL transaction)
+4. Version (`MAX(version)+1` per stream) is assigned atomically by PostgreSQL
+5. Event is published to Kafka (best-effort — failure is logged, not propagated)
+6. `201 Created` returned with the full persisted event including assigned version
+
+**Fan-out flow:**
+
+1. `consumer-service` reads from `events.v1`
+2. Each message is indexed into Elasticsearch with `event.ID` as the document ID (idempotent upsert)
+3. On indexing failure: message is routed to `events.v1.dlq`, offset is committed — the consumer never stalls
+
+**Data consistency:**
+
+| Endpoint | Read from | Consistency |
+|---|---|---|
+| `POST /events` response | PostgreSQL | Strong |
+| `GET /events/{id}` | PostgreSQL | Strong |
+| `GET /events?correlation_id=X` | PostgreSQL | Strong |
+| `GET /events/timeline` | PostgreSQL | Strong |
+| `GET /events/{streamID}` | Elasticsearch | Eventual |
+
+---
+
+## Development
 
 ```bash
-curl -X POST http://localhost:8080/tenants \
-  -H "X-Admin-Key: admin-secret" \
-  -H "Content-Type: application/json" \
-  -d '{"tenant_id": "acme", "subject_id": "acme-admin"}'
-# → {"token": "eyJ...", "expires_at": "..."}
+# Unit tests
+make test
+
+# Unit tests with race detector
+go test -race ./...
+
+# Lint
+make lint
+
+# Build all binaries to bin/
+make build
+
+# End-to-end smoke test (requires running stack)
+make test-e2e
+
+# Regenerate Swagger docs from annotations
+make swag
+
+# Regenerate gRPC stubs from proto/events.proto
+make proto
+
+# Apply pending database migrations
+make migrate
 ```
 
-Use the returned JWT for all subsequent requests:
+### Adding a database migration
 
 ```bash
-curl -X POST http://localhost:8080/events \
-  -H "Authorization: Bearer eyJ..." \
-  -H "Content-Type: application/json" \
-  -d '{"stream_id":"order:1","type":"order.created","source":"orders-svc","payload":{}}'
+# Create the next numbered file
+touch db/migrations/004_my_change.sql
+# Edit it, then apply:
+make migrate
 ```
 
-Validate credentials and discover tenant scope:
+Migration files run in lexicographic order. Each migration runs in its own transaction — if it fails, nothing is committed. Already-applied migrations are skipped.
 
-```bash
-curl -X POST http://localhost:8080/auth/token \
-  -H "Authorization: Bearer eyJ..."
-# → {"subject_id": "acme-admin", "tenant_id": "acme", "roles": ["writer", "reader"]}
+### Project layout
+
 ```
+cmd/                    entry points (one directory per binary)
+  ingest-api/
+  consumer-service/
+  replay-service/
+  migrate/
+db/migrations/          numbered SQL migration files (embedded at build time)
+docs/                   generated Swagger docs + architecture doc
+gen/proto/              generated protobuf stubs
+internal/
+  domain/event/         domain model + port interfaces (zero external deps)
+  application/          use cases (depend only on domain interfaces)
+  infrastructure/       adapters (Postgres, Kafka, Elasticsearch, HTTP, gRPC)
+  config/               environment variable loading
+  pkg/trace/            W3C traceparent helpers
+proto/                  protobuf schema definitions
+scripts/                dev helper scripts
+```
+
+---
+
+## Roadmap
+
+| Status | Item |
+|---|---|
+| Done | Event ingestion, Kafka fan-out, Elasticsearch read model |
+| Done | Query API (by stream, by ID, by correlation, by causation, timeline) |
+| Done | Replay engine with dry-run support |
+| Done | Auth (none / API key / JWT), multi-tenant isolation |
+| Done | DLQ routing for failed indexing |
+| Done | gRPC replay service |
+| Done | Embedded Swagger UI |
+| Done | Database migrations (embedded, idempotent) |
+| Planned | Prometheus metrics endpoint |
+| Planned | S3/MinIO cold archival |
+| Planned | Event snapshots (stream compaction) |
+| Planned | Integration tests in CI (testcontainers) |
+| Planned | Schema validation (JSON Schema per event type) |
 
 ---
 
@@ -259,21 +337,21 @@ curl -X POST http://localhost:8080/auth/token \
 
 ### POST /events — Ingest
 
+```bash
+curl -X POST http://localhost:8080/events \
+  -H "X-API-Key: dev-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stream_id":    "order:1",
+    "type":         "order.created",
+    "source":       "orders-svc",
+    "payload":      {"amount": 99.99},
+    "correlation_id": "req-abc-123",
+    "actor_id":     "user-uuid"
+  }'
 ```
-POST /events
-X-API-Key: dev-api-key
-Content-Type: application/json
 
-{
-  "stream_id": "order:1",
-  "type":      "order.created",
-  "source":    "orders-svc",
-  "payload":   {"amount": 99.99},
-  "metadata":  {"region": "us-east-1", "trace_id": "abc-123"}
-}
-```
-
-Response `201`:
+Response `201 Created`:
 
 ```json
 {
@@ -283,151 +361,70 @@ Response `201`:
   "type":        "order.created",
   "source":      "orders-svc",
   "version":     1,
-  "occurred_at": "2026-04-26T10:00:00Z",
+  "occurred_at": "2026-06-23T10:00:00Z",
   "payload":     {"amount": 99.99}
 }
 ```
 
-- `version` is assigned atomically by the store (`MAX + 1` per stream).
-- Kafka publish is best-effort — a Kafka failure does **not** fail this request.
-
-### GET /events/{streamID} — Query (read model)
-
-```
-GET /events/order:1?limit=20&offset=0
-X-API-Key: dev-api-key
-```
-
-Response `200`:
-
-```json
-{
-  "stream_id":  "order:1",
-  "events":     [...],
-  "total":      3,
-  "limit":      20,
-  "offset":     0,
-  "read_model": "elasticsearch"
-}
-```
-
-Response headers:
-- `X-Read-Model: elasticsearch`
-- `X-Data-Consistency: eventual`
-
-### GET /health
-
-```
-GET /health  →  200 {"status": "ok"}
-```
-
-No authentication required.
-
----
-
-## Configuration
-
-All configuration is via environment variables. Defaults work out of the box with `docker-compose.yml`.
+### GET /events/{streamID} — Query stream (Elasticsearch)
 
 ```bash
-cp .env.example .env  # then edit as needed
+curl "http://localhost:8080/events/order:1?limit=20&offset=0" \
+  -H "X-API-Key: dev-api-key"
 ```
 
-| Variable | Default | Description |
-|---|---|---|
-| `HTTP_ADDR` | `:8080` | HTTP listen address |
-| `GRPC_ADDR` | `:50051` | gRPC listen address |
-| `POSTGRES_DSN` | `postgres://events:events@localhost:5433/events?sslmode=disable` | PostgreSQL DSN |
-| `KAFKA_BROKERS` | `localhost:9094` | Comma-separated broker addresses |
-| `KAFKA_TOPIC` | `events` | Main events topic |
-| `KAFKA_DLQ_TOPIC` | `events-dlq` | Dead-letter queue topic |
-| `KAFKA_GROUP_ID` | `consumer-service` | Consumer group ID |
-| `ELASTICSEARCH_ADDRS` | `http://localhost:9200` | Comma-separated ES node addresses |
-| `ELASTICSEARCH_INDEX` | `events` | ES index name |
-| `AUTH_MODE` | `simple` | `simple` (API key) or `jwt` (Bearer token) |
-| `AUTH_API_KEY` | `dev-api-key` | Static API key for `simple` mode |
-| `AUTH_JWT_SECRET` | _(empty)_ | HMAC secret for `jwt` mode — required when `AUTH_MODE=jwt` |
-| `ADMIN_KEY` | `admin-secret` | Protects `POST /tenants` (tenant bootstrap) |
-
----
-
-## Make Reference
+### GET /events/{id} — Direct lookup (PostgreSQL)
 
 ```bash
-# Dev workflow
-make dev             # infra in Docker + ingest-api locally (fast iteration)
-make dev-consumer    # infra in Docker + consumer-service locally
-make wait-infra      # start infra only and wait for healthchecks
-
-# Full stack
-make dev-full        # everything in Docker, logs in foreground (production-like)
-make up              # everything in Docker, detached
-make down            # stop all containers
-make logs            # tail all logs
-
-# Database
-make migrate         # apply pending SQL migrations
-
-# Testing
-make test            # unit tests
-make test-e2e        # end-to-end smoke test (requires running stack)
-
-# Build & tooling
-make build           # compile all binaries → bin/
-make lint            # golangci-lint
-make tidy            # go mod tidy
-make swag            # regenerate Swagger docs from annotations
-make proto           # regenerate gRPC stubs from .proto files
+curl "http://localhost:8080/events/01906c2e-4a3b-7000-8000-abc123def456" \
+  -H "X-API-Key: dev-api-key"
 ```
 
----
+### POST /replay — Replay events
 
-## Data Guarantees
+```bash
+# Dry run (preview without writing)
+curl -X POST http://localhost:8080/replay \
+  -H "X-API-Key: dev-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "filter":  { "stream_id": "order:1" },
+    "options": { "dry_run": true, "safety_limit": 100 }
+  }'
 
-| Guarantee | Details |
-|---|---|
-| Append-only | Events are never updated or deleted |
-| Per-stream ordering | `version` is strictly increasing per `stream_id` |
-| Atomic writes | Each `POST /events` is a single PostgreSQL transaction |
-| At-least-once delivery | Kafka consumer may receive duplicates |
-| Idempotent indexing | ES uses event UUID as document ID — re-indexing is safe |
-| DLQ routing | ES indexing failures are routed to `events-dlq`, never silently lost |
-| Replay integrity | Replay always reads from PostgreSQL, not Kafka or Elasticsearch |
+# Active replay
+curl -X POST http://localhost:8080/replay \
+  -H "X-API-Key: dev-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "filter":  { "stream_id": "order:1" },
+    "options": { "replay_reason": "Consumer was down, re-triggering workflow runs." }
+  }'
+```
 
----
-
-## Tech Stack
-
-| Concern | Technology |
-|---|---|
-| Event store | PostgreSQL 16 (append-only, `UNIQUE` per `stream_id + version`) |
-| Event bus | Kafka 3.7 (KRaft mode, no ZooKeeper) |
-| Read model | Elasticsearch 8 |
-| Cold storage | MinIO (S3-compatible) |
-| Language | Go 1.24 |
-| HTTP router | chi v5 |
-| gRPC | google.golang.org/grpc |
-| Auth | Static API key / HMAC-HS256 JWT |
-| API docs | Swaggo (OpenAPI 2.0, Swagger UI embedded) |
+For the full API reference with all endpoints and request/response schemas, see the Swagger UI at `http://localhost:8080/swagger/index.html`.
 
 ---
 
-## Status
+## Operational Runbook
 
-| Component | Status |
-|---|---|
-| Event Store (Postgres) | Done |
-| Kafka Producer | Done |
-| Kafka Consumer + DLQ | Done |
-| Elasticsearch Indexer | Done |
-| HTTP Ingest + Query API | Done |
-| Auth (simple + JWT) | Done |
-| Tenant bootstrap (`POST /tenants`) | Done |
-| Replay Engine (gRPC) | Done |
-| Swagger UI | Done |
-| Database migrations | Done |
-| Unit tests | Done |
-| E2E smoke test | Done |
-| Snapshots | Pending |
-| S3/MinIO archival | Pending |
-| Observability (metrics) | Pending |
+See [RUNBOOK.md](RUNBOOK.md) for step-by-step procedures covering:
+
+- Incident reconstruction using correlation and causation IDs
+- Replay procedures (dry run → active replay → verification)
+- DLQ recovery workflows
+- Cross-service log correlation using trace IDs
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, the layer boundary rules, commit style, and PR process.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for the security model, supported auth modes, and how to report a vulnerability.
+
+## License
+
+[MIT](LICENSE) — Copyright (c) 2026 Sahid Ayala

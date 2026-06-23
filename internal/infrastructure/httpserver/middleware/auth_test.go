@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	appauth "github.com/SheykoWk/event-streaming-and-audit/internal/application/auth"
+	appauth "github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/application/auth"
 )
 
 // stubAuthenticator lets tests control the Authenticate outcome.

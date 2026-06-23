@@ -6,7 +6,7 @@ import (
 
 	gjwt "github.com/golang-jwt/jwt/v5"
 
-	appauth "github.com/SheykoWk/event-streaming-and-audit/internal/application/auth"
+	appauth "github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/application/auth"
 )
 
 const defaultExpiry = time.Hour

@@ -3,8 +3,8 @@ package middleware
 import (
 	"net/http"
 
-	appauth "github.com/SheykoWk/event-streaming-and-audit/internal/application/auth"
-	infraauth "github.com/SheykoWk/event-streaming-and-audit/internal/infrastructure/auth"
+	appauth "github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/application/auth"
+	infraauth "github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/infrastructure/auth"
 )
 
 // Auth returns an HTTP middleware that authenticates every request.

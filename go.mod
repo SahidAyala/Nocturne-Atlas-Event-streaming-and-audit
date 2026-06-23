@@ -1,4 +1,4 @@
-module github.com/SheykoWk/event-streaming-and-audit
+module github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit
 
 go 1.24.0
 

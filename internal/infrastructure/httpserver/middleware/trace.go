@@ -3,7 +3,7 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/SheykoWk/event-streaming-and-audit/internal/pkg/trace"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/pkg/trace"
 )
 
 // TraceContext is chi middleware that extracts the W3C traceparent header,

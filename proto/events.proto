@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package events.v1;
 
-option go_package = "github.com/SheykoWk/event-streaming-and-audit/gen/proto/events;eventsv1";
+option go_package = "github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/gen/proto/events;eventsv1";
 
 import "google/protobuf/timestamp.proto";
 

@@ -17,14 +17,14 @@ import (
 	"github.com/google/uuid"
 	httpSwagger "github.com/swaggo/http-swagger"
 
-	appauth "github.com/SheykoWk/event-streaming-and-audit/internal/application/auth"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/application/ingest"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/application/query"
-	appreplay "github.com/SheykoWk/event-streaming-and-audit/internal/application/replay"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/domain/event"
-	infraauth "github.com/SheykoWk/event-streaming-and-audit/internal/infrastructure/auth"
-	authmw "github.com/SheykoWk/event-streaming-and-audit/internal/infrastructure/httpserver/middleware"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/pkg/trace"
+	appauth "github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/application/auth"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/application/ingest"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/application/query"
+	appreplay "github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/application/replay"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/domain/event"
+	infraauth "github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/infrastructure/auth"
+	authmw "github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/infrastructure/httpserver/middleware"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/pkg/trace"
 )
 
 type handler struct {

@@ -8,9 +8,9 @@ import (
 
 	kafkago "github.com/segmentio/kafka-go"
 
-	"github.com/SheykoWk/event-streaming-and-audit/internal/config"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/domain/event"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/pkg/trace"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/config"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/domain/event"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/pkg/trace"
 )
 
 // Producer publishes events to Kafka, routing each message to the topic

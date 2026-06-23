@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/uuid"
 
-	appauth "github.com/SheykoWk/event-streaming-and-audit/internal/application/auth"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/domain/event"
+	appauth "github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/application/auth"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/domain/event"
 )
 
 // ---------------------------------------------------------------------------

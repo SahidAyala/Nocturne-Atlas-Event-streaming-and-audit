@@ -437,7 +437,7 @@ const file_events_proto_rawDesc = "" +
 	"\x06events\x18\x02 \x03(\v2\x10.events.v1.EventR\x06events2\x89\x01\n" +
 	"\fEventService\x12=\n" +
 	"\x06Ingest\x12\x18.events.v1.IngestRequest\x1a\x19.events.v1.IngestResponse\x12:\n" +
-	"\x06Replay\x12\x18.events.v1.ReplayRequest\x1a\x16.events.v1.EventStreamBIZGgithub.com/SheykoWk/event-streaming-and-audit/gen/proto/events;eventsv1b\x06proto3"
+	"\x06Replay\x12\x18.events.v1.ReplayRequest\x1a\x16.events.v1.EventStreamBIZGgithub.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/gen/proto/events;eventsv1b\x06proto3"
 
 var (
 	file_events_proto_rawDescOnce sync.Once

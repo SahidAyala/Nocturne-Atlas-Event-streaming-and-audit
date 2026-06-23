@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/SheykoWk/event-streaming-and-audit/internal/domain/event"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/domain/event"
 )
 
 // ---------------------------------------------------------------------------

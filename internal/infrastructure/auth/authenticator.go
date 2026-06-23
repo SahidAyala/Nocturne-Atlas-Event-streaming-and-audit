@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	appauth "github.com/SheykoWk/event-streaming-and-audit/internal/application/auth"
+	appauth "github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/application/auth"
 )
 
 // Authenticator is the port for request authentication.

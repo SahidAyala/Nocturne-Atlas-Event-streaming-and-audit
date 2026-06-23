@@ -7,10 +7,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/SheykoWk/event-streaming-and-audit/internal/application/consume"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/config"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/infrastructure/elasticsearch"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/infrastructure/kafka"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/application/consume"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/config"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/infrastructure/elasticsearch"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/infrastructure/kafka"
 )
 
 func main() {

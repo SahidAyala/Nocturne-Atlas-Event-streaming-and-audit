@@ -12,9 +12,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	appauth "github.com/SheykoWk/event-streaming-and-audit/internal/application/auth"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/config"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/domain/event"
+	appauth "github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/application/auth"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/config"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/domain/event"
 )
 
 const ddl = `

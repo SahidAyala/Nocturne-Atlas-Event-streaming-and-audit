@@ -3,8 +3,8 @@ package kafka
 import (
 	"strings"
 
-	"github.com/SheykoWk/event-streaming-and-audit/internal/config"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/domain/event"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/config"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/domain/event"
 )
 
 // TopicResolver decides which Kafka topic an event should be published to.

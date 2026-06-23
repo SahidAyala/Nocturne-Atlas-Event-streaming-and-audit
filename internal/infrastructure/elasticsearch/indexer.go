@@ -12,8 +12,8 @@ import (
 	"github.com/elastic/go-elasticsearch/v8"
 	"github.com/elastic/go-elasticsearch/v8/esapi"
 
-	"github.com/SheykoWk/event-streaming-and-audit/internal/config"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/domain/event"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/config"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/domain/event"
 )
 
 // mapping defines the Elasticsearch index schema for events.

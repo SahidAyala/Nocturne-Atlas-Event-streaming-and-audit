@@ -10,11 +10,11 @@ import (
 
 	"google.golang.org/grpc"
 
-	eventsv1 "github.com/SheykoWk/event-streaming-and-audit/gen/proto"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/application/replay"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/config"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/infrastructure/grpcserver"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/infrastructure/postgres"
+	eventsv1 "github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/gen/proto"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/application/replay"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/config"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/infrastructure/grpcserver"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/infrastructure/postgres"
 )
 
 func main() {

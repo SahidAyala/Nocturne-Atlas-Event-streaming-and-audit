@@ -23,8 +23,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	migrations "github.com/SheykoWk/event-streaming-and-audit/db/migrations"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/config"
+	migrations "github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/db/migrations"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/config"
 )
 
 func main() {

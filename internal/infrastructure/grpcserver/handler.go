@@ -9,10 +9,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	eventsv1 "github.com/SheykoWk/event-streaming-and-audit/gen/proto"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/application/replay"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/domain/event"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/pkg/trace"
+	eventsv1 "github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/gen/proto"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/application/replay"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/domain/event"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/pkg/trace"
 )
 
 // Handler implements the EventServiceServer gRPC interface.

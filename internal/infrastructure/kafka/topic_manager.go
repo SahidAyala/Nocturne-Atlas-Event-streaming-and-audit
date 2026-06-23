@@ -10,7 +10,7 @@ import (
 
 	kafkago "github.com/segmentio/kafka-go"
 
-	"github.com/SheykoWk/event-streaming-and-audit/internal/config"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/config"
 )
 
 // TopicSpec describes a Kafka topic to be provisioned.

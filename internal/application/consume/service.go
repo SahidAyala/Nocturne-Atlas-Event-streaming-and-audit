@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/SheykoWk/event-streaming-and-audit/internal/domain/event"
-	"github.com/SheykoWk/event-streaming-and-audit/internal/pkg/trace"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/domain/event"
+	"github.com/SahidAyala/Nocturne-Atlas-Event-streaming-and-audit/internal/pkg/trace"
 )
 
 // Subscriber is satisfied by any message source that can deliver a stream of events.

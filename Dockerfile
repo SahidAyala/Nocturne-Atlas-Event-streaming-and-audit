@@ -30,6 +30,10 @@ FROM alpine:3.20
 
 RUN apk --no-cache add ca-certificates tzdata wget
 
+RUN addgroup -S app && adduser -S app -G app
+
 COPY --from=builder /bin/app /bin/app
+
+USER app
 
 ENTRYPOINT ["/bin/app"]

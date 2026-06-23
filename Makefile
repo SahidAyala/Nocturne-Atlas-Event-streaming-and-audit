@@ -1,4 +1,4 @@
-.PHONY: dev dev-full wait-infra up down logs run run-consumer run-replay
+.PHONY: dev dev-full wait-infra up down logs run run-consumer run-replay build test test-e2e migrate lint tidy swag proto
 
 # =============================================================================
 # Smart Dev Experience
@@ -72,6 +72,12 @@ build:
 
 test:
 	go test ./...
+
+test-e2e:
+	@bash scripts/smoke-test.sh
+
+migrate:
+	go run ./cmd/migrate
 
 lint:
 	golangci-lint run ./...

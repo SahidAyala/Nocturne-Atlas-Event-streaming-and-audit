@@ -94,6 +94,11 @@ func main() {
 	querySvc := query.NewService(store, esIndexer, log)
 	replayEngine := replay.NewReplayEngine(store, publisher, log)
 
+	if cfg.Auth.AdminKey == "" {
+		log.Error("ADMIN_KEY must be set — refusing to start without an admin key")
+		os.Exit(1)
+	}
+
 	authenticator := buildAuthenticator(cfg.Auth, log)
 	issuer := buildIssuer(cfg.Auth, log)
 
@@ -183,7 +188,8 @@ func buildAuthenticator(cfg config.AuthConfig, log *slog.Logger) infraauth.Authe
 		log.Info("auth mode: simple (api-key)")
 		return simple.New(cfg.APIKey)
 	default:
-		log.Warn("unknown AUTH_MODE, falling back to none", "mode", cfg.Mode)
-		return none.New()
+		log.Error("unrecognized AUTH_MODE — must be one of: none, simple, jwt", "mode", cfg.Mode)
+		os.Exit(1)
+		return nil // unreachable; satisfies compiler
 	}
 }

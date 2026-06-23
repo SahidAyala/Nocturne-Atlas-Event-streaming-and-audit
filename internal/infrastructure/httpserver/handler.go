@@ -3,6 +3,7 @@ package httpserver
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -216,7 +217,7 @@ func (h *handler) authIssue(w http.ResponseWriter, r *http.Request) {
 // @Failure      500          {object}  ErrorResponse  "Failed to issue token"
 // @Router       /tenants [post]
 func (h *handler) createTenant(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("X-Admin-Key") != h.adminKey {
+	if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Admin-Key")), []byte(h.adminKey)) != 1 {
 		writeError(w, http.StatusUnauthorized, "invalid or missing X-Admin-Key")
 		return
 	}

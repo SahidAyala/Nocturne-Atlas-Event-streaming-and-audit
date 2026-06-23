@@ -84,6 +84,8 @@ func (c KafkaConfig) DLQTopicName() string {
 type ElasticsearchConfig struct {
 	Addresses []string
 	Index     string
+	Username  string
+	Password  string
 }
 
 func Load() *Config {
@@ -112,12 +114,14 @@ func Load() *Config {
 		Elasticsearch: ElasticsearchConfig{
 			Addresses: strings.Split(getEnv("ELASTICSEARCH_ADDRS", "http://localhost:9200"), ","),
 			Index:     getEnv("ELASTICSEARCH_INDEX", "events"),
+			Username:  getEnv("ELASTICSEARCH_USERNAME", ""),
+			Password:  getEnv("ELASTICSEARCH_PASSWORD", ""),
 		},
 		Auth: AuthConfig{
-			Mode:      getEnv("AUTH_MODE", "none"),
+			Mode:      getEnv("AUTH_MODE", "simple"),
 			APIKey:    getEnv("AUTH_API_KEY", "dev-api-key"),
 			JWTSecret: getEnv("AUTH_JWT_SECRET", ""),
-			AdminKey:  getEnv("ADMIN_KEY", "admin-secret"),
+			AdminKey:  getEnv("ADMIN_KEY", ""),
 		},
 	}
 }
